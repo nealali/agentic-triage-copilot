@@ -68,4 +68,3 @@ def build_scorecard_rows(runs_by_issue: dict[UUID, list[AgentRun]]) -> list[dict
             )
 
     return rows
-

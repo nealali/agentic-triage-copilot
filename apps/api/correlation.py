@@ -42,4 +42,3 @@ def get_correlation_id() -> UUID | None:
     """Get the correlation_id for the current request context (or None)."""
 
     return _correlation_id_var.get()
-

@@ -25,4 +25,3 @@ def _reset_store_before_each_test() -> None:
     """Automatically reset in-memory storage before each test."""
 
     reset_in_memory_store()
-

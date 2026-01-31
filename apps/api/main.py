@@ -1,18 +1,20 @@
+from uuid import uuid4
+
 from fastapi import FastAPI
 from starlette.requests import Request
 from starlette.responses import Response
-from uuid import uuid4
 
+from apps.api.correlation import set_correlation_id
 from apps.api.routes.analyze import router as analyze_router
 from apps.api.routes.audit import router as audit_router
 from apps.api.routes.decisions import router as decisions_router
 from apps.api.routes.eval import router as eval_router
 from apps.api.routes.issues import router as issues_router
-from apps.api.correlation import set_correlation_id
 
 # FastAPI application instance.
 # FastAPI discovers routes attached to this app object.
 app = FastAPI(title="Agentic Triage Copilot")
+
 
 # Middleware: attach a correlation ID to every request.
 # This makes it easy to trace requests in logs and audit trails.
@@ -24,6 +26,7 @@ async def correlation_id_middleware(request: Request, call_next) -> Response:
     response: Response = await call_next(request)
     response.headers["X-Correlation-ID"] = str(correlation_id)
     return response
+
 
 # Register routers (API modules).
 # Keeping routers in separate files is a clean-architecture pattern:

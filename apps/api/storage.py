@@ -53,6 +53,7 @@ AUDIT: list[AuditEvent] = []
 # Helper functions (CRUD)
 # -----------------------
 
+
 def reset_in_memory_store() -> None:
     """
     Clear all global stores.
@@ -248,7 +249,10 @@ def append_decision(issue_id: UUID, decision_create: DecisionCreate) -> Decision
     # - Otherwise, it remains triaged.
     issue = ISSUES.get(issue_id)
     if issue is not None:
-        issue.status = IssueStatus.CLOSED if decision.final_action == "IGNORE" else IssueStatus.TRIAGED
+        if decision.final_action == "IGNORE":
+            issue.status = IssueStatus.CLOSED
+        else:
+            issue.status = IssueStatus.TRIAGED
         ISSUES[issue_id] = issue
 
     return decision

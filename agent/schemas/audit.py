@@ -76,7 +76,9 @@ class AuditEvent(BaseModel):
     # This is a common production pattern for observability and debugging.
     correlation_id: UUID | None = Field(
         default=None,
-        description="Optional request correlation ID used to trace related actions across the system.",
+        description=(
+            "Optional request correlation ID used to trace related actions across the system."
+        ),
     )
 
     # Use UTC for consistency across systems and teams.
@@ -103,6 +105,7 @@ class AuditEvent(BaseModel):
     # without needing free-form message parsing.
     details: dict[str, Any] = Field(
         default_factory=dict,
-        description="Optional structured details (avoid large payloads; keep it small and audit-friendly).",
+        description=(
+            "Optional structured details (avoid large payloads; keep it small and audit-friendly)."
+        ),
     )
-

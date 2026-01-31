@@ -222,6 +222,14 @@ def test_eval_scorecard_returns_rows_including_rule_fired() -> None:
 
     assert isinstance(rows, list)
     assert len(rows) >= 1
-    assert {"issue_id", "run_id", "created_at", "severity", "action", "confidence", "rule_fired"} <= set(rows[0].keys())
+    expected_keys = {
+        "issue_id",
+        "run_id",
+        "created_at",
+        "severity",
+        "action",
+        "confidence",
+        "rule_fired",
+    }
+    assert expected_keys <= set(rows[0].keys())
     assert any(r["issue_id"] == issue_id and r["rule_fired"] for r in rows)
-

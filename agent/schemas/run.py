@@ -73,4 +73,3 @@ class AgentRunSummary(BaseModel):
             action=run.recommendation.action,
             confidence=run.recommendation.confidence,
         )
-

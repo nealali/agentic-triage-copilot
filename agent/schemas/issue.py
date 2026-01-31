@@ -126,9 +126,7 @@ class Issue(BaseModel):
 
     # `UUID` is a standard type for unique IDs.
     # `default_factory=uuid4` means: "if not provided, generate a new UUID automatically".
-    issue_id: UUID = Field(
-        default_factory=uuid4, description="Unique identifier for the issue"
-    )
+    issue_id: UUID = Field(default_factory=uuid4, description="Unique identifier for the issue")
 
     # `datetime` holds timestamps.
     # `default_factory=datetime.utcnow` generates the timestamp at creation time.

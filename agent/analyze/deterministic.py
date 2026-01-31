@@ -27,7 +27,6 @@ from typing import Any, Iterable
 from agent.schemas.issue import Issue
 from agent.schemas.recommendation import Action, AgentRecommendation, Severity
 
-
 # -----------------------------
 # Small helpers (pure functions)
 # -----------------------------
@@ -115,7 +114,9 @@ def _try_parse_datetime(value: Any) -> datetime | None:
         return None
 
 
-def _extract_possible_dates(evidence_payload: dict[str, Any]) -> tuple[datetime | None, datetime | None, dict[str, Any]]:
+def _extract_possible_dates(
+    evidence_payload: dict[str, Any],
+) -> tuple[datetime | None, datetime | None, dict[str, Any]]:
     """
     Extract likely start/end dates from evidence_payload.
 
@@ -231,8 +232,8 @@ def _build_query_site_message(issue: Issue) -> str:
 
     fields_str = ", ".join(issue.fields) if issue.fields else "(unspecified fields)"
     return (
-        f"Subject {issue.subject_id}: Please review the following potential issue in {issue.domain} "
-        f"for fields [{fields_str}]. {issue.description} "
+        f"Subject {issue.subject_id}: Please review the following potential issue "
+        f"in {issue.domain} for fields [{fields_str}]. {issue.description} "
         "Kindly confirm and/or provide clarification/corrections as appropriate."
     )
 
@@ -395,4 +396,3 @@ def analyze_issue(issue: Issue) -> AgentRecommendation:
         tool_results=tool_results,
         draft_message=None,
     )
-

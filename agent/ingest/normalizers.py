@@ -83,6 +83,8 @@ def from_sas_listing(payload: dict[str, Any]) -> IssueCreate:
         subject_id=str(payload.get("subject", "")),
         fields=list(payload.get("fields", [])),
         description=str(payload.get("finding", "")),
-        evidence_payload={"rows": payload.get("rows", []), "listing_name": payload.get("listing_name")},
+        evidence_payload={
+            "rows": payload.get("rows", []),
+            "listing_name": payload.get("listing_name"),
+        },
     )
-

@@ -74,4 +74,3 @@ class AgentRecommendation(BaseModel):
         default=None,
         description="Optional draft message/query text for human review and editing.",
     )
-
