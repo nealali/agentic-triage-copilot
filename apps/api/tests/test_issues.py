@@ -1,17 +1,8 @@
 from uuid import uuid4
 
-import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.main import app
-from apps.api.storage import ISSUES
-
-
-# Important: storage is a global in-memory dict, so it persists across tests.
-# Clear it before each test to keep tests isolated and deterministic.
-@pytest.fixture(autouse=True)
-def _clear_in_memory_store() -> None:
-    ISSUES.clear()
 
 
 def test_create_issue_then_get_by_id_returns_it() -> None:
@@ -57,7 +48,7 @@ def test_list_issues_includes_created_issues() -> None:
         "evidence_payload": {"k": 1},
     }
     payload2 = {
-        "source": "listing_review",
+        "source": "listing",
         "domain": "VS",
         "subject_id": "SUBJ-2",
         "fields": ["field_b"],

@@ -48,8 +48,16 @@ This repository currently includes an MVP foundation:
 - **Issue contracts** (Pydantic v2) in `agent/schemas/issue.py`
 - **Recommendation contracts** (Pydantic v2) in `agent/schemas/recommendation.py`
 - **Agent run contracts** (Pydantic v2) in `agent/schemas/run.py`
+- **Decision contracts** (Pydantic v2) in `agent/schemas/decision.py`
+- **Audit event contracts** (Pydantic v2) in `agent/schemas/audit.py`
 - **In-memory issue store** (`apps/api/storage.py`) for fast iteration (resets on restart)
-- **Issues API router** (`apps/api/routes/issues.py`)
+- **Deterministic analyzer** (`agent/analyze/deterministic.py`) to produce structured recommendations (no LLM)
+- **API routers**:
+  - `apps/api/routes/issues.py`
+  - `apps/api/routes/analyze.py`
+  - `apps/api/routes/decisions.py`
+  - `apps/api/routes/audit.py`
+  - `apps/api/routes/eval.py`
 - **Automated tests** (`apps/api/tests/test_issues.py`) that clear the in-memory store between tests
 - **Tooling baseline**: Ruff + Black config (`pyproject.toml`), test/run docs, `requirements.txt`
 
@@ -59,11 +67,17 @@ This repository currently includes an MVP foundation:
 - **POST `/issues`**: create an issue
 - **GET `/issues`**: list issues
 - **GET `/issues/{issue_id}`**: fetch a single issue (404 if not found)
+- **POST `/issues/{issue_id}/analyze`**: run deterministic analysis and create an AgentRun
+- **GET `/issues/{issue_id}/runs`**: list analysis runs (summary)
+- **POST `/issues/{issue_id}/decisions`**: record a human decision tied to a run_id
+- **GET `/issues/{issue_id}/decisions`**: list decisions (most recent first)
+- **GET `/audit`**: query audit events (optional `issue_id`, `run_id`)
+- **GET `/eval/scorecard`**: export scorecard rows for runs
 
 ### Issue data contract (MVP)
 An issue represents a triage unit of work tied to a subject and domain (DM/VS/LB/AE/Commercial/Medical).
 
-- **`source`**: `manual | edit_check | listing_review`
+- **`source`**: `manual | edit_check | listing`
 - **`domain`**: `DM | VS | LB | AE | COMMERCIAL | MEDICAL`
 - **`subject_id`**: subject identifier (synthetic or real, depending on environment)
 - **`fields`**: list of impacted variables (e.g., `AESTDTC`, `AEENDTC`)
@@ -101,6 +115,30 @@ uvicorn apps.api.main:app --reload
 
 Open the interactive API docs at `http://127.0.0.1:8000/docs`.
 
+### 2.1) Example curl commands (Windows-friendly)
+
+Create an issue:
+
+```powershell
+curl -X POST "http://127.0.0.1:8000/issues" `
+  -H "Content-Type: application/json" `
+  -d '{\"source\":\"manual\",\"domain\":\"AE\",\"subject_id\":\"SUBJ-100\",\"fields\":[\"AESTDTC\",\"AEENDTC\"],\"description\":\"AE end date is before start date.\",\"evidence_payload\":{\"start_date\":\"2024-01-10\",\"end_date\":\"2024-01-01\"}}'
+```
+
+Analyze an issue (replace `<ISSUE_ID>`):
+
+```powershell
+curl -X POST "http://127.0.0.1:8000/issues/<ISSUE_ID>/analyze"
+```
+
+Record a decision (replace `<ISSUE_ID>` and `<RUN_ID>`):
+
+```powershell
+curl -X POST "http://127.0.0.1:8000/issues/<ISSUE_ID>/decisions" `
+  -H "Content-Type: application/json" `
+  -d '{\"run_id\":\"<RUN_ID>\",\"decision_type\":\"APPROVE\",\"final_action\":\"QUERY_SITE\",\"final_text\":\"Send site query.\",\"reviewer\":\"jdoe\"}'
+```
+
 ### 3) Run tests
 Recommended:
 
@@ -111,7 +149,7 @@ Recommended:
 Or:
 
 ```powershell
-pytest apps/api/tests/test_issues.py -v
+python -m pytest -q
 ```
 
 ## Important operational note (MVP)
@@ -140,7 +178,7 @@ agentic-triage-copilot/
 ```
 
 ## Roadmap (production target)
-- **Contracts**: add schemas for `Decision` and `AuditEvent` (recommendation + run schemas are in place)
+- **Contracts**: refine contracts as the workflow grows (e.g., audit event taxonomy, decision types)
 - **Persistence**: Postgres + migrations; store issues, runs, decisions, audit events, documents/chunks
 - **Deterministic tools**: rules engine + pandas/SQL checks (small structured outputs)
 - **Retrieval (RAG)**: ingest SOP/spec docs; retrieve top-k evidence; require citations

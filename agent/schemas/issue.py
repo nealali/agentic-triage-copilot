@@ -38,12 +38,31 @@ class IssueSource(str, Enum):
     Example allowed values:
     - "manual"
     - "edit_check"
-    - "listing_review"
+    - "listing"
     """
 
     MANUAL = "manual"
     EDIT_CHECK = "edit_check"
-    LISTING_REVIEW = "listing_review"
+    LISTING = "listing"
+
+
+class IssueStatus(str, Enum):
+    """
+    Lifecycle status of an issue.
+
+    Why track status?
+    - It helps teams filter work (what is new vs already reviewed).
+    - It helps systems enforce workflow steps (e.g., only triaged issues can be closed).
+
+    Typical lifecycle for this MVP:
+    - OPEN: newly created issue, not yet analyzed
+    - TRIAGED: analyzed, recommendation/run exists
+    - CLOSED: resolved/accepted/ignored (no further action)
+    """
+
+    OPEN = "open"
+    TRIAGED = "triaged"
+    CLOSED = "closed"
 
 
 class IssueDomain(str, Enum):
@@ -119,7 +138,10 @@ class Issue(BaseModel):
     created_at: datetime = Field(
         default_factory=datetime.utcnow, description="Timestamp when the issue was created"
     )
-    status: str = Field(..., description="Current status of the issue")
+    status: IssueStatus = Field(
+        default=IssueStatus.OPEN,
+        description="Current status of the issue (open/triaged/closed).",
+    )
 
     # These fields mirror IssueCreate so Issue contains the full issue context.
     source: IssueSource = Field(..., description="Source of the issue")
