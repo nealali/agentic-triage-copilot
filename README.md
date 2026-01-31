@@ -98,13 +98,16 @@ An issue represents a triage unit of work tied to a subject and domain (DM/VS/LB
 This repository demonstrates **enterprise patterns** (contracts, testing, audit-first design). Actual GxP / 21 CFR Part 11 compliance depends on controls and validation in the deployment environment and is not claimed by this repo alone.
 
 ## Quick start (local development)
+### Python version
+This repo pins a recommended local Python version in `.python-version` (useful with tools like pyenv).
+
 ### 1) Create a virtual environment and install dependencies
 
 ```powershell
 cd c:\dev\agentic-triage-copilot
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 ```
 
 ### 2) Run the API
@@ -114,6 +117,13 @@ uvicorn apps.api.main:app --reload
 ```
 
 Open the interactive API docs at `http://127.0.0.1:8000/docs`.
+
+### 2.0) Run a full demo flow script
+With the API running, you can exercise the full workflow in one command:
+
+```powershell
+.\scripts\demo_flow.ps1
+```
 
 ### 2.1) Example curl commands (Windows-friendly)
 
@@ -149,6 +159,15 @@ Recommended:
 Or:
 
 ```powershell
+python -m pytest -q
+```
+
+### 4) Lint and formatting checks (what CI runs)
+Locally, you can run the same checks as GitHub Actions:
+
+```powershell
+ruff check .
+black --check .
 python -m pytest -q
 ```
 

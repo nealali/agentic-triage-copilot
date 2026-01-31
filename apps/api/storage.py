@@ -30,6 +30,7 @@ from agent.schemas.audit import AuditEvent, AuditEventType
 from agent.schemas.decision import Decision, DecisionCreate
 from agent.schemas.issue import Issue, IssueCreate, IssueStatus
 from agent.schemas.run import AgentRun, AgentRunSummary
+from apps.api.correlation import get_correlation_id
 
 # -----------------------
 # Global in-memory stores
@@ -81,12 +82,17 @@ def add_audit_event(
     We keep audit events small, structured, and append-only.
     """
 
+    # Pull correlation_id from the current request context (if available).
+    # This lets us connect audit events back to the API request that created them.
+    correlation_id = get_correlation_id()
+
     event = AuditEvent(
         event_type=event_type,
         created_at=datetime.utcnow(),
         actor=actor,
         issue_id=issue_id,
         run_id=run_id,
+        correlation_id=correlation_id,
         details=details or {},
     )
     AUDIT.append(event)

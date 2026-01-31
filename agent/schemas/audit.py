@@ -72,6 +72,13 @@ class AuditEvent(BaseModel):
     )
     event_type: AuditEventType = Field(..., description="Category describing what happened.")
 
+    # correlation_id ties together all audit events produced by the same API request.
+    # This is a common production pattern for observability and debugging.
+    correlation_id: UUID | None = Field(
+        default=None,
+        description="Optional request correlation ID used to trace related actions across the system.",
+    )
+
     # Use UTC for consistency across systems and teams.
     created_at: datetime = Field(
         default_factory=datetime.utcnow,

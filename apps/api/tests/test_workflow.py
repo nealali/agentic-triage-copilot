@@ -52,6 +52,7 @@ def test_analyze_existing_issue_creates_run_and_triages_issue() -> None:
     # Analyze it
     res = client.post(f"/issues/{issue_id}/analyze")
     assert res.status_code == 200
+    assert "X-Correlation-ID" in res.headers
     run = res.json()
 
     # Run contains recommendation info
@@ -123,6 +124,7 @@ def test_post_decision_approve_is_stored_and_status_updated() -> None:
     }
     dec_res = client.post(f"/issues/{issue_id}/decisions", json=decision_payload)
     assert dec_res.status_code == 200
+    assert "X-Correlation-ID" in dec_res.headers
     decision = dec_res.json()
     assert decision["issue_id"] == issue_id
     assert decision["run_id"] == run["run_id"]
@@ -186,10 +188,13 @@ def test_audit_endpoint_returns_events_after_analyze_and_decision() -> None:
     # Audit should include events for this issue
     audit_res = client.get(f"/audit?issue_id={issue_id}")
     assert audit_res.status_code == 200
+    assert "X-Correlation-ID" in audit_res.headers
     events = audit_res.json()
     assert isinstance(events, list)
     assert any(e["event_type"] == "ANALYZE_RUN_CREATED" for e in events)
     assert any(e["event_type"] == "DECISION_RECORDED" for e in events)
+    # Correlation ID should be present on events created via API requests.
+    assert any(e.get("correlation_id") for e in events)
 
     # Audit filtered by run_id should find the analyze/decision events
     audit_run_res = client.get(f"/audit?run_id={run['run_id']}")
