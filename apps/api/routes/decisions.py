@@ -9,18 +9,23 @@ The key design goal is auditability:
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from agent.schemas.decision import Decision, DecisionCreate
 from agent.schemas.issue import IssueStatus
 from agent.schemas.recommendation import Action
 from apps.api import storage
+from apps.api.auth import auth_enabled, require_roles
 
 router = APIRouter(prefix="/issues", tags=["decisions"])
 
 
 @router.post("/{issue_id}/decisions", response_model=Decision)
-def create_decision(issue_id: UUID, decision_create: DecisionCreate) -> Decision:
+def create_decision(
+    issue_id: UUID,
+    decision_create: DecisionCreate,
+    _auth=Depends(require_roles({"reviewer", "admin"})),
+) -> Decision:
     """
     Record a human decision for a specific issue/run.
 
@@ -40,6 +45,11 @@ def create_decision(issue_id: UUID, decision_create: DecisionCreate) -> Decision
     issue = storage.BACKEND.get_issue(issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
+
+    # If auth is enabled, do not trust "reviewer" coming from the request body.
+    # Enforce that the authenticated user matches the recorded reviewer.
+    if auth_enabled() and decision_create.reviewer != _auth.user:
+        raise HTTPException(status_code=403, detail="reviewer must match authenticated user")
 
     # Storage helper raises KeyError if run_id is not valid for this issue.
     try:

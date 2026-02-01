@@ -4,6 +4,7 @@
 
 .DESCRIPTION
   This script exercises the core workflow:
+    0) POST /documents (optional RAG-lite guidance)
     1) POST /issues
     2) POST /issues/{id}/analyze
     3) POST /issues/{id}/decisions
@@ -16,15 +17,18 @@
 
   Assumptions:
   - You have the API running locally (recommended command below).
-  - curl is available (Windows 10+ includes it).
+  - If you want persistence across restarts, run with Postgres enabled (see README).
 
   Start the API in another terminal:
     uvicorn apps.api.main:app --reload
 #>
+param(
+  [Parameter(Mandatory = $false)][string]$BaseUrl = "http://127.0.0.1:8000",
+  [Parameter(Mandatory = $false)][string]$ApiKey = "",
+  [Parameter(Mandatory = $false)][switch]$PauseForRestart
+)
 
 $ErrorActionPreference = "Stop"
-
-$BaseUrl = "http://127.0.0.1:8000"
 
 Write-Host "=== Agentic Triage Copilot demo flow ===" -ForegroundColor Cyan
 Write-Host "Base URL: $BaseUrl"
@@ -48,6 +52,9 @@ function Invoke-ApiJson {
   )
 
   $headers = @{ Accept = "application/json" }
+  if (-not [string]::IsNullOrWhiteSpace($ApiKey)) {
+    $headers["X-API-Key"] = $ApiKey
+  }
 
   if ($null -ne $BodyObject) {
     $jsonBody = $BodyObject | ConvertTo-Json -Depth 10
@@ -75,8 +82,20 @@ try {
 }
 Write-Host "Health: $($healthResp.Data.status) (X-Correlation-ID: $($healthResp.CorrelationId))"
 
+# 0) Ingest a guidance document (RAG-lite)
+Write-Host "`n[0/6] Ingesting a guidance document (POST /documents)..." -ForegroundColor Cyan
+$docPayload = @{
+  title   = "AE Date Checks Guidance"
+  source  = "DRP"
+  tags    = @("AE", "queries")
+  content = "AE date start/end inconsistency: query site for confirmation and correct EDC if needed."
+}
+$docResp = Invoke-ApiJson -Method "POST" -Url "$BaseUrl/documents" -BodyObject $docPayload
+$docId = $docResp.Data.doc_id
+Write-Host "Ingested doc_id: $docId (X-Correlation-ID: $($docResp.CorrelationId))"
+
 # 1) Create an issue
-Write-Host "`n[2/5] Creating an issue (POST /issues)..." -ForegroundColor Cyan
+Write-Host "`n[1/6] Creating an issue (POST /issues)..." -ForegroundColor Cyan
 $issuePayload = @{
   source = "manual"
   domain = "AE"
@@ -94,18 +113,19 @@ $issueId = $issueResp.Data.issue_id
 Write-Host "Created issue_id: $issueId (X-Correlation-ID: $($issueResp.CorrelationId))"
 
 # 2) Analyze the issue
-Write-Host "`n[3/5] Analyzing issue (POST /issues/$issueId/analyze)..." -ForegroundColor Cyan
+Write-Host "`n[2/6] Analyzing issue (POST /issues/$issueId/analyze)..." -ForegroundColor Cyan
 $runResp = Invoke-ApiJson -Method "POST" -Url "$BaseUrl/issues/$issueId/analyze"
 $runId = $runResp.Data.run_id
 Write-Host "Created run_id: $runId (X-Correlation-ID: $($runResp.CorrelationId))"
 Write-Host "Rule fired: $($runResp.Data.recommendation.tool_results.rule_fired)"
+Write-Host "Citations (doc IDs): $($runResp.Data.recommendation.citations -join ', ')"
 Write-Host ("Recommendation: action={0} severity={1} confidence={2}" -f `
   $runResp.Data.recommendation.action, `
   $runResp.Data.recommendation.severity, `
   $runResp.Data.recommendation.confidence)
 
 # 3) Record a human decision tied to the run
-Write-Host "`n[4/5] Recording decision (POST /issues/$issueId/decisions)..." -ForegroundColor Cyan
+Write-Host "`n[3/6] Recording decision (POST /issues/$issueId/decisions)..." -ForegroundColor Cyan
 $decisionPayload = @{
   run_id = $runId
   decision_type = "APPROVE"
@@ -117,15 +137,25 @@ $decisionPayload = @{
 $decisionResp = Invoke-ApiJson -Method "POST" -Url "$BaseUrl/issues/$issueId/decisions" -BodyObject $decisionPayload
 Write-Host "Decision recorded. decision_id: $($decisionResp.Data.decision_id) (X-Correlation-ID: $($decisionResp.CorrelationId))"
 
+# Optional pause: demonstrate persistence across API restarts (Postgres vs in-memory)
+if ($PauseForRestart) {
+  Write-Host "`n[optional] Restart the API now, then press Enter to continue." -ForegroundColor Yellow
+  Write-Host "If Postgres storage is enabled, the issue should still exist after restart."
+  [void](Read-Host)
+
+  $issueAfterRestart = Invoke-ApiJson -Method "GET" -Url "$BaseUrl/issues/$issueId"
+  Write-Host "After restart, GET /issues/{id} returned status=$($issueAfterRestart.StatusCode)."
+}
+
 # 4) Audit query
-Write-Host "`n[5/5] Fetching audit events (GET /audit?issue_id=...)..." -ForegroundColor Cyan
+Write-Host "`n[4/6] Fetching audit events (GET /audit?issue_id=...)..." -ForegroundColor Cyan
 $auditResp = Invoke-ApiJson -Method "GET" -Url "$BaseUrl/audit?issue_id=$issueId"
 $audit = $auditResp.Data
 Write-Host "Audit events found: $($audit.Count) (X-Correlation-ID: $($auditResp.CorrelationId))"
 $audit | Select-Object event_type, actor, created_at, issue_id, run_id, correlation_id | Format-Table -AutoSize
 
 # 5) Scorecard export
-Write-Host "`n[extra] Fetching scorecard rows (GET /eval/scorecard)..." -ForegroundColor Cyan
+Write-Host "`n[5/6] Fetching scorecard rows (GET /eval/scorecard)..." -ForegroundColor Cyan
 $scoreResp = Invoke-ApiJson -Method "GET" -Url "$BaseUrl/eval/scorecard"
 $scorecard = $scoreResp.Data
 Write-Host "Scorecard rows: $($scorecard.Count) (X-Correlation-ID: $($scoreResp.CorrelationId))"

@@ -50,6 +50,8 @@ This repository currently includes an MVP foundation:
 - **Agent run contracts** (Pydantic v2) in `agent/schemas/run.py`
 - **Decision contracts** (Pydantic v2) in `agent/schemas/decision.py`
 - **Audit event contracts** (Pydantic v2) in `agent/schemas/audit.py`
+- **Document contracts** (Pydantic v2) in `agent/schemas/document.py` (RAG-lite guidance ingestion)
+- **Analyze request contract** (Pydantic v2) in `agent/schemas/analyze.py` (rules_version + replay linkage)
 - **UI view models** (Pydantic v2) in `agent/schemas/views.py` (combined responses for frontends)
 - **Swappable storage backend** (`apps/api/storage.py`):
   - Default: in-memory (fast MVP iteration)
@@ -63,6 +65,7 @@ This repository currently includes an MVP foundation:
   - `apps/api/routes/analyze.py`
   - `apps/api/routes/decisions.py`
   - `apps/api/routes/audit.py`
+  - `apps/api/routes/documents.py`
   - `apps/api/routes/eval.py`
 - **Correlation IDs + structured request logging**:
   - Every response includes an `X-Correlation-ID` header
@@ -71,7 +74,9 @@ This repository currently includes an MVP foundation:
   - API workflow tests (in-memory backend) with test isolation
   - Storage round-trip tests for `PostgresStorageBackend` using SQLite (no external DB required)
 - **Tooling baseline**: Ruff + Black config (`pyproject.toml`), test/run docs, `requirements.txt`, `requirements-dev.txt`
-- **CI**: GitHub Actions workflow in `.github/workflows/ci.yml`
+- **CI**: GitHub Actions workflow in `.github/workflows/ci.yml`:
+  - Lint + tests (default in-memory backend)
+  - Tests against a real Postgres service (backend switch via env vars)
 - **Demo automation**: `scripts/demo_flow.ps1`
 - **Optional persistence path**:
   - Enable Postgres backend via environment variables (see below)
@@ -86,9 +91,13 @@ This repository currently includes an MVP foundation:
 - **GET `/issues/{issue_id}`**: fetch a single issue (404 if not found)
 - **GET `/issues/{issue_id}/overview`**: UI-friendly “one call” view (issue + latest run/decision + recent audit)
 - **POST `/issues/{issue_id}/analyze`**: run deterministic analysis and create an AgentRun
+  - Supports an optional JSON body: `{"rules_version": "v0.1", "replay_of_run_id": "<RUN_ID>"}` for versioning/replay linkage
 - **GET `/issues/{issue_id}/runs`**: list analysis runs (summary)
 - **POST `/issues/{issue_id}/decisions`**: record a human decision tied to a run_id
 - **GET `/issues/{issue_id}/decisions`**: list decisions (most recent first)
+- **POST `/documents`**: ingest a guidance document (RAG-lite)
+- **GET `/documents/search?q=...`**: keyword search guidance documents
+- **GET `/documents/{doc_id}`**: fetch a guidance document by ID
 - **GET `/audit`**: query audit events (optional `issue_id`, `run_id`)
 - **GET `/eval/scorecard`**: export scorecard rows for runs
 
@@ -148,6 +157,19 @@ With the API running, you can exercise the full workflow in one command:
 .\scripts\demo_flow.ps1
 ```
 
+Optional:
+- Demonstrate persistence across restarts (useful with Postgres backend):
+
+```powershell
+.\scripts\demo_flow.ps1 -PauseForRestart
+```
+
+- If API-key auth is enabled, pass a key:
+
+```powershell
+.\scripts\demo_flow.ps1 -ApiKey "devkey"
+```
+
 ### 2.1) Example curl commands (Windows-friendly)
 
 Create an issue:
@@ -193,6 +215,21 @@ ruff check .
 black --check .
 python -m pytest -q
 ```
+
+## Optional: API-key auth (basic, default OFF)
+This repo includes a minimal API-key auth layer suitable for demos and learning.
+
+- **Default**: auth is disabled (no keys required).
+- **Enable**:
+
+```powershell
+$env:AUTH_ENABLED="1"
+$env:API_KEYS="devkey:jdoe:reviewer|writer,adminkey:admin:admin"
+```
+
+When auth is enabled:
+- Mutation endpoints like **POST `/documents`** and **POST `/issues/{issue_id}/decisions`** require `X-API-Key`.
+- Decision recording prevents “reviewer spoofing” by enforcing `reviewer` matches the authenticated user.
 
 ## Optional: Docker + Postgres + migrations (persistence path)
 The application runs without a database by default, but the repo includes a clean path to persistence.
