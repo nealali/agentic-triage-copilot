@@ -37,21 +37,21 @@ def create_decision(issue_id: UUID, decision_create: DecisionCreate) -> Decision
     - Pydantic validates that OVERRIDE requires `reason`.
     """
 
-    issue = storage.get_issue(issue_id)
+    issue = storage.BACKEND.get_issue(issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
 
     # Storage helper raises KeyError if run_id is not valid for this issue.
     try:
-        decision = storage.append_decision(issue_id, decision_create)
+        decision = storage.BACKEND.append_decision(issue_id, decision_create)
     except KeyError:
         raise HTTPException(status_code=404, detail="run_id not found for this issue")
 
     # Status transition rule (simple MVP behavior)
     if decision.final_action == Action.IGNORE:
-        storage.update_issue_status(issue_id, IssueStatus.CLOSED)
+        storage.BACKEND.update_issue_status(issue_id, IssueStatus.CLOSED)
     else:
-        storage.update_issue_status(issue_id, IssueStatus.TRIAGED)
+        storage.BACKEND.update_issue_status(issue_id, IssueStatus.TRIAGED)
 
     return decision
 
@@ -64,8 +64,8 @@ def list_decisions(issue_id: UUID) -> list[Decision]:
     Returns 404 if issue does not exist.
     """
 
-    issue = storage.get_issue(issue_id)
+    issue = storage.BACKEND.get_issue(issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
 
-    return storage.list_decisions(issue_id)
+    return storage.BACKEND.list_decisions(issue_id)

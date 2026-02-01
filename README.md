@@ -50,16 +50,26 @@ This repository currently includes an MVP foundation:
 - **Agent run contracts** (Pydantic v2) in `agent/schemas/run.py`
 - **Decision contracts** (Pydantic v2) in `agent/schemas/decision.py`
 - **Audit event contracts** (Pydantic v2) in `agent/schemas/audit.py`
-- **In-memory issue store** (`apps/api/storage.py`) for fast iteration (resets on restart)
+- **UI view models** (Pydantic v2) in `agent/schemas/views.py` (combined responses for frontends)
+- **In-memory store + storage interface** (`apps/api/storage.py`) so storage can be swapped to Postgres later
 - **Deterministic analyzer** (`agent/analyze/deterministic.py`) to produce structured recommendations (no LLM)
+- **Ingestion normalizers** (`agent/ingest/normalizers.py`) to convert source-specific payloads into `IssueCreate`
 - **API routers**:
   - `apps/api/routes/issues.py`
   - `apps/api/routes/analyze.py`
   - `apps/api/routes/decisions.py`
   - `apps/api/routes/audit.py`
   - `apps/api/routes/eval.py`
+- **Correlation IDs + structured request logging**:
+  - Every response includes an `X-Correlation-ID` header
+  - Audit events include `correlation_id` to trace “what happened during one request”
 - **Automated tests** (`apps/api/tests/test_issues.py`) that clear the in-memory store between tests
-- **Tooling baseline**: Ruff + Black config (`pyproject.toml`), test/run docs, `requirements.txt`
+- **Tooling baseline**: Ruff + Black config (`pyproject.toml`), test/run docs, `requirements.txt`, `requirements-dev.txt`
+- **CI**: GitHub Actions workflow in `.github/workflows/ci.yml`
+- **Demo automation**: `scripts/demo_flow.ps1`
+- **Optional persistence path** (not wired into the app yet):
+  - `infra/docker-compose.yml` (Postgres + API)
+  - `alembic.ini` + `infra/migrations/` (migrations scaffold)
 
 ## API (MVP)
 ### Endpoints
@@ -67,6 +77,7 @@ This repository currently includes an MVP foundation:
 - **POST `/issues`**: create an issue
 - **GET `/issues`**: list issues
 - **GET `/issues/{issue_id}`**: fetch a single issue (404 if not found)
+- **GET `/issues/{issue_id}/overview`**: UI-friendly “one call” view (issue + latest run/decision + recent audit)
 - **POST `/issues/{issue_id}/analyze`**: run deterministic analysis and create an AgentRun
 - **GET `/issues/{issue_id}/runs`**: list analysis runs (summary)
 - **POST `/issues/{issue_id}/decisions`**: record a human decision tied to a run_id
@@ -117,6 +128,11 @@ uvicorn apps.api.main:app --reload
 ```
 
 Open the interactive API docs at `http://127.0.0.1:8000/docs`.
+
+### 2.0) Notes on observability (correlation IDs)
+Every API response includes an `X-Correlation-ID` header. This helps you trace:
+- the request that created a run/decision
+- the audit events produced by that request
 
 ### 2.0) Run a full demo flow script
 With the API running, you can exercise the full workflow in one command:
@@ -171,6 +187,23 @@ black --check .
 python -m pytest -q
 ```
 
+## Optional: Docker + Postgres + migrations (persistence path)
+The application runs without a database today, but the repo includes a clean path to persistence.
+
+### Start Postgres + API via Docker Compose
+
+```powershell
+docker compose -f .\infra\docker-compose.yml up --build
+```
+
+### Migrations (Alembic)
+Migrations are scaffolded under `infra/migrations/`. When you’re ready to apply them:
+
+```powershell
+$env:DATABASE_URL="postgresql+psycopg://app:app@localhost:5432/triage"
+alembic upgrade head
+```
+
 ## Important operational note (MVP)
 The current store is a global in-memory dictionary (`ISSUES`):
 - it **resets on server restart**
@@ -182,9 +215,12 @@ This is intentional for early iteration; the roadmap includes Postgres for persi
 
 ```
 agentic-triage-copilot/
+  .github/workflows/      # CI pipeline (lint + tests)
   apps/
     api/                 # FastAPI service
   agent/
+    analyze/             # deterministic analyzer (current MVP)
+    ingest/              # ingestion/normalization adapters (current MVP)
     schemas/             # Pydantic models (IO contracts)
     tools/               # deterministic checks (planned)
     prompts/             # versioned prompts (planned)
@@ -192,8 +228,9 @@ agentic-triage-copilot/
   data/
     seed/                # synthetic seed tables + docs (planned)
     goldenset/           # labeled evaluation cases (planned)
-  infra/                 # docker / db / migrations (planned)
+  infra/                 # docker / db / migrations (path included)
   eval/                  # evaluation harness (planned)
+  scripts/               # runnable demo scripts
 ```
 
 ## Roadmap (production target)

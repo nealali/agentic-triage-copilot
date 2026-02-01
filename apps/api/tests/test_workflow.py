@@ -233,3 +233,38 @@ def test_eval_scorecard_returns_rows_including_rule_fired() -> None:
     }
     assert expected_keys <= set(rows[0].keys())
     assert any(r["issue_id"] == issue_id and r["rule_fired"] for r in rows)
+
+
+def test_issue_overview_includes_latest_run_decision_and_audit() -> None:
+    client = TestClient(app)
+
+    issue = _create_issue(
+        client,
+        description="AE end before start.",
+        evidence_payload={"start_date": "2024-05-10", "end_date": "2024-05-01"},
+    )
+    issue_id = issue["issue_id"]
+
+    run = client.post(f"/issues/{issue_id}/analyze").json()
+    decision_payload = {
+        "run_id": run["run_id"],
+        "decision_type": "APPROVE",
+        "final_action": "QUERY_SITE",
+        "final_text": "Send site query.",
+        "reviewer": "reviewer_overview",
+    }
+    assert client.post(f"/issues/{issue_id}/decisions", json=decision_payload).status_code == 200
+
+    res = client.get(f"/issues/{issue_id}/overview")
+    assert res.status_code == 200
+    assert "X-Correlation-ID" in res.headers
+
+    overview = res.json()
+    assert overview["issue"]["issue_id"] == issue_id
+    allowed_actions = {"QUERY_SITE", "DATA_FIX", "MEDICAL_REVIEW", "IGNORE"}
+    assert overview["latest_run"]["action"] in allowed_actions
+    assert overview["latest_decision"]["reviewer"] == "reviewer_overview"
+    assert overview["runs_count"] >= 1
+    assert overview["decisions_count"] >= 1
+    assert isinstance(overview["recent_audit_events"], list)
+    assert any(e.get("correlation_id") for e in overview["recent_audit_events"])

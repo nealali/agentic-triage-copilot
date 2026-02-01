@@ -1,3 +1,6 @@
+import json
+import logging
+import time
 from uuid import uuid4
 
 from fastapi import FastAPI
@@ -15,6 +18,10 @@ from apps.api.routes.issues import router as issues_router
 # FastAPI discovers routes attached to this app object.
 app = FastAPI(title="Agentic Triage Copilot")
 
+# Logger for request-level structured logs.
+# In production you would configure handlers/formatters (JSON logs, log shipping, etc.).
+logger = logging.getLogger("agentic_triage_copilot.api")
+
 
 # Middleware: attach a correlation ID to every request.
 # This makes it easy to trace requests in logs and audit trails.
@@ -23,7 +30,24 @@ async def correlation_id_middleware(request: Request, call_next) -> Response:
     correlation_id = uuid4()
     set_correlation_id(correlation_id)
 
+    start = time.perf_counter()
     response: Response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000.0
+
+    # Structured log line (JSON string) so it is easy to parse in log tools.
+    # We keep fields small and stable for enterprise observability.
+    logger.info(
+        json.dumps(
+            {
+                "event": "http_request",
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round(duration_ms, 2),
+                "correlation_id": str(correlation_id),
+            }
+        )
+    )
     response.headers["X-Correlation-ID"] = str(correlation_id)
     return response
 

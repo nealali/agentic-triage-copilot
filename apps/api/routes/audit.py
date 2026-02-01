@@ -29,4 +29,4 @@ def query_audit(issue_id: UUID | None = None, run_id: UUID | None = None) -> lis
     - GET /audit?issue_id=...&run_id=... -> events matching both
     """
 
-    return storage.query_audit(issue_id=issue_id, run_id=run_id)
+    return storage.BACKEND.query_audit(issue_id=issue_id, run_id=run_id)

@@ -1,4 +1,11 @@
 # Developer tooling (lint/format)
-ruff>=0.6.0
-black>=24.0.0
+#
+# We pin versions so that:
+# - local runs match CI runs
+# - formatting stays consistent across machines
+#
+# Note: Black 26.1.0 was observed to hang in some Windows/Python setups.
+# Pinning avoids "it works on my machine" issues.
+ruff==0.14.14
+black==24.10.0
 

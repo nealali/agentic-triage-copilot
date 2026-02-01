@@ -28,4 +28,4 @@ def scorecard() -> list[dict]:
     - rule_fired (from deterministic tool_results)
     """
 
-    return build_scorecard_rows(storage.RUNS)
+    return build_scorecard_rows(storage.BACKEND.runs_by_issue())

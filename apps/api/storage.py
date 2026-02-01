@@ -23,7 +23,7 @@ rest of the app doesn't care *how* data is stored.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from agent.schemas.audit import AuditEvent, AuditEventType
@@ -49,6 +49,132 @@ DECISIONS: dict[UUID, list[Decision]] = {}
 AUDIT: list[AuditEvent] = []
 
 
+# -----------------------------
+# Storage interface (swap-ready)
+# -----------------------------
+#
+# Why define an interface now?
+# - Today we store data in memory (fast MVP).
+# - Later we want to swap to Postgres without rewriting route handlers.
+# - An interface makes the boundary explicit: "these are the operations storage must support".
+#
+# This is a strong "enterprise" signal because it shows you are designing for change.
+
+
+class StorageBackend(Protocol):
+    """Interface that any storage backend (in-memory, Postgres, etc.) must implement."""
+
+    def reset(self) -> None: ...
+
+    def create_issue(self, issue_create: IssueCreate) -> Issue: ...
+    def list_issues(self) -> list[Issue]: ...
+    def get_issue(self, issue_id: UUID) -> Issue | None: ...
+    def update_issue_status(self, issue_id: UUID, status: IssueStatus) -> Issue | None: ...
+
+    def append_run(self, issue_id: UUID, run: AgentRun) -> None: ...
+    def list_runs(self, issue_id: UUID) -> list[AgentRun]: ...
+    def list_run_summaries(self, issue_id: UUID) -> list[AgentRunSummary]: ...
+    def runs_by_issue(self) -> dict[UUID, list[AgentRun]]: ...
+
+    def append_decision(self, issue_id: UUID, decision_create: DecisionCreate) -> Decision: ...
+    def list_decisions(self, issue_id: UUID) -> list[Decision]: ...
+
+    def add_audit_event(
+        self,
+        *,
+        event_type: AuditEventType,
+        actor: str,
+        issue_id: UUID | None = None,
+        run_id: UUID | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> AuditEvent: ...
+
+    def query_audit(
+        self, *, issue_id: UUID | None = None, run_id: UUID | None = None
+    ) -> list[AuditEvent]: ...
+
+
+class InMemoryStorageBackend:
+    """
+    In-memory implementation of StorageBackend.
+
+    This class delegates to the module-level functions below.
+    It's mainly here to demonstrate the "swappable storage" pattern cleanly.
+    """
+
+    def reset(self) -> None:
+        reset_in_memory_store()
+
+    def create_issue(self, issue_create: IssueCreate) -> Issue:
+        return create_issue(issue_create)
+
+    def list_issues(self) -> list[Issue]:
+        return list_issues()
+
+    def get_issue(self, issue_id: UUID) -> Issue | None:
+        return get_issue(issue_id)
+
+    def update_issue_status(self, issue_id: UUID, status: IssueStatus) -> Issue | None:
+        return update_issue_status(issue_id, status)
+
+    def append_run(self, issue_id: UUID, run: AgentRun) -> None:
+        append_run(issue_id, run)
+
+    def list_runs(self, issue_id: UUID) -> list[AgentRun]:
+        return list_runs(issue_id)
+
+    def list_run_summaries(self, issue_id: UUID) -> list[AgentRunSummary]:
+        return list_run_summaries(issue_id)
+
+    def runs_by_issue(self) -> dict[UUID, list[AgentRun]]:
+        return runs_by_issue()
+
+    def append_decision(self, issue_id: UUID, decision_create: DecisionCreate) -> Decision:
+        return append_decision(issue_id, decision_create)
+
+    def list_decisions(self, issue_id: UUID) -> list[Decision]:
+        return list_decisions(issue_id)
+
+    def add_audit_event(
+        self,
+        *,
+        event_type: AuditEventType,
+        actor: str,
+        issue_id: UUID | None = None,
+        run_id: UUID | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> AuditEvent:
+        return add_audit_event(
+            event_type=event_type, actor=actor, issue_id=issue_id, run_id=run_id, details=details
+        )
+
+    def query_audit(
+        self, *, issue_id: UUID | None = None, run_id: UUID | None = None
+    ) -> list[AuditEvent]:
+        return query_audit(issue_id=issue_id, run_id=run_id)
+
+
+class PostgresStorageBackend:
+    """
+    Placeholder for a future Postgres-backed implementation.
+
+    We intentionally do NOT implement this yet (MVP stays DB-free).
+    The presence of this stub documents the intended architecture:
+    route handlers should depend on the StorageBackend interface, not on dicts.
+    """
+
+    def __getattr__(self, name: str) -> Any:  # pragma: no cover
+        raise NotImplementedError(
+            f"PostgresStorageBackend is not implemented yet (attempted to access: {name})."
+        )
+
+
+# The active backend for this MVP.
+# Later, you can switch this to PostgresStorageBackend() (once implemented)
+# without changing your API route logic.
+BACKEND: StorageBackend = InMemoryStorageBackend()
+
+
 # -----------------------
 # Helper functions (CRUD)
 # -----------------------
@@ -67,6 +193,30 @@ def reset_in_memory_store() -> None:
     RUNS.clear()
     DECISIONS.clear()
     AUDIT.clear()
+
+
+def list_runs(issue_id: UUID) -> list[AgentRun]:
+    """Return the full run objects for an issue (oldest -> newest)."""
+
+    return RUNS.get(issue_id, [])
+
+
+def runs_by_issue() -> dict[UUID, list[AgentRun]]:
+    """
+    Return the underlying runs dict.
+
+    We return the actual dict for convenience in the MVP (used by eval exports).
+    In a database-backed implementation, this would likely become a query function.
+    """
+
+    return RUNS
+
+
+def get_latest_run(issue_id: UUID) -> AgentRun | None:
+    """Return the most recent run for an issue, or None if none exist."""
+
+    runs = RUNS.get(issue_id, [])
+    return runs[-1] if runs else None
 
 
 def add_audit_event(

@@ -15,3 +15,9 @@ pydantic>=2.0.0
 
 # Environment variable management
 python-dotenv>=1.0.0
+
+# Database (optional, planned)
+# Not required for the in-memory MVP, but included to support the Postgres migration path.
+SQLAlchemy>=2.0.0
+alembic>=1.13.0
+psycopg[binary]>=3.1.0

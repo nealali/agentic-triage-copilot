@@ -34,17 +34,17 @@ def analyze(issue_id: UUID) -> AgentRun:
     - Writes an audit event: ANALYZE_RUN_CREATED
     """
 
-    issue = storage.get_issue(issue_id)
+    issue = storage.BACKEND.get_issue(issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
 
     recommendation = analyze_issue(issue)
     run = AgentRun(issue_id=issue_id, rules_version="v0.1", recommendation=recommendation)
 
-    storage.append_run(issue_id, run)
-    storage.update_issue_status(issue_id, IssueStatus.TRIAGED)
+    storage.BACKEND.append_run(issue_id, run)
+    storage.BACKEND.update_issue_status(issue_id, IssueStatus.TRIAGED)
 
-    storage.add_audit_event(
+    storage.BACKEND.add_audit_event(
         event_type=AuditEventType.ANALYZE_RUN_CREATED,
         actor="SYSTEM",
         issue_id=issue_id,
@@ -67,8 +67,8 @@ def list_runs(issue_id: UUID) -> list[AgentRunSummary]:
     issue-scoped endpoints.
     """
 
-    issue = storage.get_issue(issue_id)
+    issue = storage.BACKEND.get_issue(issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
 
-    return storage.list_run_summaries(issue_id)
+    return storage.BACKEND.list_run_summaries(issue_id)
