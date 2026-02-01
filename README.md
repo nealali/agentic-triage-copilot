@@ -51,7 +51,11 @@ This repository currently includes an MVP foundation:
 - **Decision contracts** (Pydantic v2) in `agent/schemas/decision.py`
 - **Audit event contracts** (Pydantic v2) in `agent/schemas/audit.py`
 - **UI view models** (Pydantic v2) in `agent/schemas/views.py` (combined responses for frontends)
-- **In-memory store + storage interface** (`apps/api/storage.py`) so storage can be swapped to Postgres later
+- **Swappable storage backend** (`apps/api/storage.py`):
+  - Default: in-memory (fast MVP iteration)
+  - Optional: Postgres persistence via `PostgresStorageBackend` (enabled by env vars)
+  - Uses SQLAlchemy Core (not ORM) for a simple, explicit storage layer
+  - UUIDs are stored as native UUIDs on Postgres; SQLite tests store UUIDs as strings for portability
 - **Deterministic analyzer** (`agent/analyze/deterministic.py`) to produce structured recommendations (no LLM)
 - **Ingestion normalizers** (`agent/ingest/normalizers.py`) to convert source-specific payloads into `IssueCreate`
 - **API routers**:
@@ -63,11 +67,14 @@ This repository currently includes an MVP foundation:
 - **Correlation IDs + structured request logging**:
   - Every response includes an `X-Correlation-ID` header
   - Audit events include `correlation_id` to trace “what happened during one request”
-- **Automated tests** (`apps/api/tests/test_issues.py`) that clear the in-memory store between tests
+- **Automated tests**:
+  - API workflow tests (in-memory backend) with test isolation
+  - Storage round-trip tests for `PostgresStorageBackend` using SQLite (no external DB required)
 - **Tooling baseline**: Ruff + Black config (`pyproject.toml`), test/run docs, `requirements.txt`, `requirements-dev.txt`
 - **CI**: GitHub Actions workflow in `.github/workflows/ci.yml`
 - **Demo automation**: `scripts/demo_flow.ps1`
-- **Optional persistence path** (not wired into the app yet):
+- **Optional persistence path**:
+  - Enable Postgres backend via environment variables (see below)
   - `infra/docker-compose.yml` (Postgres + API)
   - `alembic.ini` + `infra/migrations/` (migrations scaffold)
 
@@ -188,7 +195,19 @@ python -m pytest -q
 ```
 
 ## Optional: Docker + Postgres + migrations (persistence path)
-The application runs without a database today, but the repo includes a clean path to persistence.
+The application runs without a database by default, but the repo includes a clean path to persistence.
+
+### Enable the Postgres storage backend (env vars)
+By default the API uses in-memory storage. To persist issues/runs/decisions/audit events, set:
+
+```powershell
+$env:STORAGE_BACKEND="postgres"
+$env:DATABASE_URL="postgresql+psycopg://app:app@localhost:5432/triage"
+```
+
+Optional:
+- `AUTO_CREATE_SCHEMA=1` will auto-create tables at startup (handy for demos).
+- For production-style workflows, prefer **Alembic migrations** (below).
 
 ### Start Postgres + API via Docker Compose
 
@@ -205,11 +224,12 @@ alembic upgrade head
 ```
 
 ## Important operational note (MVP)
-The current store is a global in-memory dictionary (`ISSUES`):
+By default, the store is a global in-memory dictionary (`ISSUES`):
 - it **resets on server restart**
 - tests must clear it to remain independent (the test suite does this)
 
-This is intentional for early iteration; the roadmap includes Postgres for persistence and audit trails.
+When you switch to `STORAGE_BACKEND=postgres`, the same API routes write to Postgres instead, so runs,
+decisions, and audit events survive restarts.
 
 ## Repository structure
 
