@@ -83,4 +83,3 @@ def test_postgres_storage_backend_round_trip(tmp_path) -> None:
     audit = backend.query_audit(issue_id=issue.issue_id)
     assert len(audit) >= 2  # at least issue created + status updated
     assert any(e.event_type.value == "ISSUE_CREATED" for e in audit)
-

@@ -402,14 +402,11 @@ class PostgresStorageBackend:
     def append_decision(self, issue_id: UUID, decision_create: DecisionCreate) -> Decision:
         # Ensure the run exists for this issue (auditability).
         with self._engine.begin() as conn:
-            found = (
-                conn.execute(
-                    self._select(self._runs.c.run_id)
-                    .where(self._runs.c.issue_id == self._bind_uuid(issue_id))
-                    .where(self._runs.c.run_id == self._bind_uuid(decision_create.run_id))
-                )
-                .first()
-            )
+            found = conn.execute(
+                self._select(self._runs.c.run_id)
+                .where(self._runs.c.issue_id == self._bind_uuid(issue_id))
+                .where(self._runs.c.run_id == self._bind_uuid(decision_create.run_id))
+            ).first()
         if found is None:
             raise KeyError("run_id not found for this issue")
 
