@@ -591,16 +591,28 @@ class PostgresStorageBackend:
         if not q:
             return []
 
-        like = f"%{q}%"
-        stmt = self._select(self._documents).where(
-            (self._documents.c.title.ilike(like)) | (self._documents.c.content.ilike(like))
-        )
+        terms = [t for t in q.lower().split() if t]
+        if not terms:
+            return []
+
+        # Important: don't require the *entire query string* to appear as one substring.
+        # In real guidance docs, relevant terms often appear across multiple sentences.
+        #
+        # Instead, do a coarse SQL pre-filter using OR across individual terms,
+        # then compute a deterministic score in Python (simple + explainable).
+        from sqlalchemy import or_
+
+        term_filters = []
+        for t in terms:
+            like = f"%{t}%"
+            term_filters.append(self._documents.c.title.ilike(like))
+            term_filters.append(self._documents.c.content.ilike(like))
+
+        stmt = self._select(self._documents).where(or_(*term_filters))
 
         # Pull a bounded set, then score + top-k in Python.
         with self._engine.begin() as conn:
             rows = conn.execute(stmt.limit(200)).mappings().all()
-
-        terms = [t for t in q.lower().split() if t]
 
         def _score_text(text: str) -> float:
             lt = text.lower()
