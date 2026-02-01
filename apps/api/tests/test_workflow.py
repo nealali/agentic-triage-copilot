@@ -99,6 +99,36 @@ def test_runs_history_returns_summaries() -> None:
     assert {"run_id", "created_at", "severity", "action", "confidence"} <= set(summaries[0].keys())
 
 
+def test_analyze_supports_rules_version_and_replay_metadata() -> None:
+    client = TestClient(app)
+
+    issue = _create_issue(
+        client,
+        description="AE end before start.",
+        evidence_payload={"start_date": "2024-02-10", "end_date": "2024-02-01"},
+    )
+    issue_id = issue["issue_id"]
+
+    run1 = client.post(f"/issues/{issue_id}/analyze").json()
+
+    run2_res = client.post(
+        f"/issues/{issue_id}/analyze",
+        json={"rules_version": "v0.1", "replay_of_run_id": run1["run_id"]},
+    )
+    assert run2_res.status_code == 200
+    run2 = run2_res.json()
+
+    assert run2["rules_version"] == "v0.1"
+    assert run2["recommendation"]["tool_results"]["replay_of_run_id"] == run1["run_id"]
+
+    audit_for_run2 = client.get(f"/audit?run_id={run2['run_id']}").json()
+    assert any(
+        e["event_type"] == "ANALYZE_RUN_CREATED"
+        and e.get("details", {}).get("replay_of_run_id") == run1["run_id"]
+        for e in audit_for_run2
+    )
+
+
 def test_post_decision_approve_is_stored_and_status_updated() -> None:
     client = TestClient(app)
 

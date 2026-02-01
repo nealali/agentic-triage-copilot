@@ -17,11 +17,18 @@ before each test.
 
 import pytest
 
-from apps.api.storage import reset_in_memory_store
+from apps.api import storage
 
 
 @pytest.fixture(autouse=True)
 def _reset_store_before_each_test() -> None:
-    """Automatically reset in-memory storage before each test."""
+    """
+    Reset storage state before each test.
 
-    reset_in_memory_store()
+    Why this matters:
+    - Tests must be independent (no cross-test contamination).
+    - Our storage layer is swappable (in-memory for MVP, Postgres for persistence).
+    - Using BACKEND.reset() keeps the same test suite working for both backends.
+    """
+
+    storage.BACKEND.reset()

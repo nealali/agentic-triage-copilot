@@ -29,6 +29,7 @@ from uuid import UUID
 
 from agent.schemas.audit import AuditEvent, AuditEventType
 from agent.schemas.decision import Decision, DecisionCreate
+from agent.schemas.document import Document, DocumentCreate, DocumentHit
 from agent.schemas.issue import Issue, IssueCreate, IssueStatus
 from agent.schemas.run import AgentRun, AgentRunSummary
 from apps.api.correlation import get_correlation_id
@@ -48,6 +49,9 @@ DECISIONS: dict[UUID, list[Decision]] = {}
 
 # Audit events: append-only timeline
 AUDIT: list[AuditEvent] = []
+
+# Documents by doc_id (RAG-lite ingestion store)
+DOCUMENTS: dict[UUID, Document] = {}
 
 
 # -----------------------------
@@ -93,6 +97,13 @@ class StorageBackend(Protocol):
     def query_audit(
         self, *, issue_id: UUID | None = None, run_id: UUID | None = None
     ) -> list[AuditEvent]: ...
+
+    # -------------------------
+    # Documents (RAG-lite layer)
+    # -------------------------
+    def ingest_document(self, document_create: DocumentCreate) -> Document: ...
+    def get_document(self, doc_id: UUID) -> Document | None: ...
+    def search_documents(self, *, query: str, limit: int = 10) -> list[DocumentHit]: ...
 
 
 class InMemoryStorageBackend:
@@ -156,6 +167,15 @@ class InMemoryStorageBackend:
         self, *, issue_id: UUID | None = None, run_id: UUID | None = None
     ) -> list[AuditEvent]:
         return query_audit(issue_id=issue_id, run_id=run_id)
+
+    def ingest_document(self, document_create: DocumentCreate) -> Document:
+        return ingest_document(document_create)
+
+    def get_document(self, doc_id: UUID) -> Document | None:
+        return get_document(doc_id)
+
+    def search_documents(self, *, query: str, limit: int = 10) -> list[DocumentHit]:
+        return search_documents(query=query, limit=limit)
 
 
 class PostgresStorageBackend:
@@ -282,6 +302,17 @@ class PostgresStorageBackend:
             Column("details", JSON, nullable=False),
         )
 
+        self._documents = Table(
+            "documents",
+            metadata,
+            Column("doc_id", uuid_type, primary_key=True),
+            Column("created_at", DateTime, nullable=False),
+            Column("title", Text, nullable=False),
+            Column("source", String(64), nullable=False),
+            Column("tags", JSON, nullable=False),
+            Column("content", Text, nullable=False),
+        )
+
         # For easy local demos/tests, optionally create tables automatically.
         # In production you would usually run Alembic migrations instead.
         if auto_create_schema:
@@ -291,6 +322,7 @@ class PostgresStorageBackend:
         """Delete all rows (useful for tests)."""
 
         with self._engine.begin() as conn:
+            conn.execute(self._delete(self._documents))
             conn.execute(self._delete(self._audit))
             conn.execute(self._delete(self._decisions))
             conn.execute(self._delete(self._runs))
@@ -513,6 +545,96 @@ class PostgresStorageBackend:
             rows = conn.execute(stmt.order_by(self._audit.c.created_at)).mappings().all()
         return [AuditEvent(**dict(r)) for r in rows]
 
+    def ingest_document(self, document_create: DocumentCreate) -> Document:
+        doc = Document(**document_create.model_dump())
+
+        with self._engine.begin() as conn:
+            conn.execute(
+                self._documents.insert().values(
+                    doc_id=self._bind_uuid(doc.doc_id),
+                    created_at=doc.created_at,
+                    title=doc.title,
+                    source=doc.source,
+                    tags=doc.tags,
+                    content=doc.content,
+                )
+            )
+
+        return doc
+
+    def get_document(self, doc_id: UUID) -> Document | None:
+        with self._engine.begin() as conn:
+            row = (
+                conn.execute(
+                    self._select(self._documents).where(
+                        self._documents.c.doc_id == self._bind_uuid(doc_id)
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return Document(**dict(row)) if row else None
+
+    def search_documents(self, *, query: str, limit: int = 10) -> list[DocumentHit]:
+        """
+        Simple keyword search over documents (RAG-lite).
+
+        This is intentionally deterministic and easy to understand:
+        - filter docs by LIKE/ILIKE
+        - compute a naive score in Python
+        - return a snippet
+
+        Later you can replace this with embeddings + vector search without changing routes.
+        """
+
+        q = (query or "").strip()
+        if not q:
+            return []
+
+        like = f"%{q}%"
+        stmt = self._select(self._documents).where(
+            (self._documents.c.title.ilike(like)) | (self._documents.c.content.ilike(like))
+        )
+
+        # Pull a bounded set, then score + top-k in Python.
+        with self._engine.begin() as conn:
+            rows = conn.execute(stmt.limit(200)).mappings().all()
+
+        terms = [t for t in q.lower().split() if t]
+
+        def _score_text(text: str) -> float:
+            lt = text.lower()
+            return float(sum(1 for t in terms if t in lt))
+
+        hits: list[DocumentHit] = []
+        for r in rows:
+            title = str(r["title"])
+            content = str(r["content"])
+            combined = f"{title}\n{content}"
+            score = _score_text(combined)
+            if score <= 0:
+                continue
+
+            idx = combined.lower().find(terms[0]) if terms else -1
+            if idx < 0:
+                idx = 0
+            start = max(0, idx - 80)
+            end = min(len(combined), idx + 120)
+            snippet = combined[start:end].replace("\n", " ").strip()
+
+            hits.append(
+                DocumentHit(
+                    doc_id=r["doc_id"],
+                    title=title,
+                    source=str(r["source"]),
+                    score=score,
+                    snippet=snippet,
+                )
+            )
+
+        hits.sort(key=lambda h: h.score, reverse=True)
+        return hits[: max(0, limit)]
+
 
 # The active backend.
 #
@@ -552,6 +674,80 @@ def reset_in_memory_store() -> None:
     RUNS.clear()
     DECISIONS.clear()
     AUDIT.clear()
+    DOCUMENTS.clear()
+
+
+def ingest_document(document_create: DocumentCreate) -> Document:
+    """
+    Ingest (store) a new document for RAG-lite search.
+
+    In production, you might:
+    - store raw documents in object storage
+    - store chunks + embeddings in a vector DB
+    - keep only metadata + references here
+    """
+
+    doc = Document(**document_create.model_dump())
+    DOCUMENTS[doc.doc_id] = doc
+
+    return doc
+
+
+def get_document(doc_id: UUID) -> Document | None:
+    """Return a document by ID, or None if not found."""
+
+    return DOCUMENTS.get(doc_id)
+
+
+def search_documents(*, query: str, limit: int = 10) -> list[DocumentHit]:
+    """
+    Simple keyword search over in-memory documents.
+
+    This is a deterministic "RAG-lite" baseline:
+    - No embeddings
+    - No chunking
+    - Easy to explain and test
+    """
+
+    q = (query or "").strip()
+    if not q:
+        return []
+
+    terms = [t for t in q.lower().split() if t]
+    if not terms:
+        return []
+
+    def _score(doc: Document) -> float:
+        haystack = f"{doc.title}\n{doc.source}\n{' '.join(doc.tags)}\n{doc.content}".lower()
+        return float(sum(1 for t in terms if t in haystack))
+
+    def _snippet(doc: Document) -> str:
+        haystack = f"{doc.title}\n{doc.content}"
+        lower = haystack.lower()
+        idx = lower.find(terms[0])
+        if idx < 0:
+            idx = 0
+        start = max(0, idx - 80)
+        end = min(len(haystack), idx + 120)
+        return haystack[start:end].replace("\n", " ").strip()
+
+    hits: list[DocumentHit] = []
+    for doc in DOCUMENTS.values():
+        score = _score(doc)
+        if score <= 0:
+            continue
+        hits.append(
+            DocumentHit(
+                doc_id=doc.doc_id,
+                title=doc.title,
+                source=doc.source,
+                score=score,
+                snippet=_snippet(doc),
+            )
+        )
+
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return hits[: max(0, limit)]
 
 
 def list_runs(issue_id: UUID) -> list[AgentRun]:
