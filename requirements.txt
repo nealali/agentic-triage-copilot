@@ -21,3 +21,9 @@ python-dotenv>=1.0.0
 SQLAlchemy>=2.0.0
 alembic>=1.13.0
 psycopg[binary]>=3.1.0
+
+# Excel ingestion (RAVE/QC export parsing)
+openpyxl>=3.1.0
+
+# Multipart form (file upload for ingest)
+python-multipart>=0.0.6

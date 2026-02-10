@@ -62,6 +62,7 @@ This repository currently includes an MVP foundation:
 - **Ingestion normalizers** (`agent/ingest/normalizers.py`) to convert source-specific payloads into `IssueCreate`
 - **API routers**:
   - `apps/api/routes/issues.py`
+  - `apps/api/routes/ingest.py` (Excel file upload)
   - `apps/api/routes/analyze.py`
   - `apps/api/routes/decisions.py`
   - `apps/api/routes/audit.py`
@@ -78,6 +79,8 @@ This repository currently includes an MVP foundation:
   - Lint + tests (default in-memory backend)
   - Tests against a real Postgres service (backend switch via env vars)
 - **Demo automation**: `scripts/demo_flow.ps1`
+- **Excel ingestion**: seed file `data/seed/rave_export_demo.xlsx`, CLI script `scripts/ingest_from_excel.py`, and **POST `/ingest/issues`** for UI upload (see [Excel ingestion](#excel-ingestion) below).
+- **Full app (React)**: optional multi-page UI in `frontend/` for upload, issues list, issue detail, run analyze, record decision, and audit (see [Full app (React)](#full-app-react) below).
 - **Optional persistence path**:
   - Enable Postgres backend via environment variables (see below)
   - `infra/docker-compose.yml` (Postgres + API)
@@ -97,9 +100,54 @@ This repository currently includes an MVP foundation:
 - **GET `/issues/{issue_id}/decisions`**: list decisions (most recent first)
 - **POST `/documents`**: ingest a guidance document (RAG-lite)
 - **GET `/documents/search?q=...`**: keyword search guidance documents
+  - Search is **term-based** (query is split into keywords; it does not require the whole phrase to match as one substring)
 - **GET `/documents/{doc_id}`**: fetch a guidance document by ID
+- **POST `/ingest/issues`**: upload a single `.xlsx` file (RAVE/QC export style); creates issues via the same normalizer as the CLI script. Returns `{ "created", "issue_ids", "errors" }`. Limits: 200 rows per file, 5 MB. Accepts only `.xlsx`.
 - **GET `/audit`**: query audit events (optional `issue_id`, `run_id`)
 - **GET `/eval/scorecard`**: export scorecard rows for runs
+
+### Guidance documents + citations (RAG-lite)
+This repo now supports a small, explainable “RAG-lite” loop:
+
+- You ingest guidance as **documents** (`POST /documents`)
+- The analyzer runs deterministic rules and then does a keyword lookup over documents
+- The recommendation includes:
+  - `recommendation.citations`: a list of **document IDs** supporting the recommendation
+  - `recommendation.tool_results.citation_hits`: small metadata about retrieved docs (title/source/score)
+
+This is intentionally simple (no embeddings yet), but it demonstrates the enterprise idea:
+**“no guidance claims without a citation trail.”**
+
+### Excel ingestion
+You can load issues from an Excel file in two ways.
+
+1. **Seed file**  
+   - Location: `data/seed/rave_export_demo.xlsx` (10 example rows).  
+   - Column schema (case-insensitive, with underscores): **Source**, **Domain**, **Subject_ID**, **Fields**, **Description** (required); optional: **Start_Date**, **End_Date**, **Variable**, **Value**, **Reference**, **Notes** (mapped into `evidence_payload`). Source must be `edit_check` or `listing` (default `edit_check`).
+
+2. **CLI script**  
+   - Run from repo root:  
+     `python scripts/ingest_from_excel.py [path_to.xlsx] [--base-url URL]`  
+   - Default path: `data/seed/rave_export_demo.xlsx`.  
+   - Use `--dry-run` to validate and print payloads without POSTing.
+
+3. **API upload**  
+   - **POST `/ingest/issues`**: `multipart/form-data` with a single file (`file`). Accepts `.xlsx` only. Returns `{ "created", "issue_ids", "errors" }`. Max 200 rows per file, 5 MB. Invalid rows are skipped and reported in `errors`.
+
+### Full app (React)
+An optional multi-page UI uses the FastAPI backend for the full triage workflow.
+
+- **Location**: `frontend/` (Vite + React 18 + TypeScript + React Router + Tailwind).
+- **Prerequisites**: Node.js 18+ and npm (or equivalent).
+- **Run**:
+  ```powershell
+  cd frontend
+  npm install
+  npm run dev
+  ```
+  Opens at `http://localhost:5173`. Set `VITE_API_BASE_URL` in `frontend/.env` if the API is not at `http://localhost:8000` (e.g. `VITE_API_BASE_URL=http://localhost:8000`).
+- **Pages**: Upload (Excel file → POST `/ingest/issues`), Issues list (filter by status), Issue detail (overview, Run analyze, Record decision), Audit log. When the backend has **AUTH_ENABLED=1**, use the “API key” control in the nav to set `X-API-Key` (stored in session only).
+- **CORS**: The API allows the React dev server by default (`http://localhost:5173`, `http://127.0.0.1:5173`). Override with env: `CORS_ORIGINS` (comma-separated list).
 
 ### Issue data contract (MVP)
 An issue represents a triage unit of work tied to a subject and domain (DM/VS/LB/AE/Commercial/Medical).
@@ -231,6 +279,16 @@ When auth is enabled:
 - Mutation endpoints like **POST `/documents`** and **POST `/issues/{issue_id}/decisions`** require `X-API-Key`.
 - Decision recording prevents “reviewer spoofing” by enforcing `reviewer` matches the authenticated user.
 
+## CI: tests against Postgres (production realism)
+In addition to the standard lint + unit tests, CI runs a second job that executes the test suite
+against a real Postgres container:
+- Sets `STORAGE_BACKEND=postgres`
+- Sets `DATABASE_URL=postgresql+psycopg://...`
+- Uses `AUTO_CREATE_SCHEMA=1` so tables are created during the job
+
+This matters because Postgres behaves differently than SQLite in important ways (types, JSON,
+case-insensitive search), and we want those differences caught automatically.
+
 ## Optional: Docker + Postgres + migrations (persistence path)
 The application runs without a database by default, but the repo includes a clean path to persistence.
 
@@ -260,6 +318,10 @@ $env:DATABASE_URL="postgresql+psycopg://app:app@localhost:5432/triage"
 alembic upgrade head
 ```
 
+Notes:
+- `0001_initial_tables` creates issues/runs/decisions/audit tables
+- `0002_documents_table` adds the `documents` table used by the RAG-lite layer
+
 ## Important operational note (MVP)
 By default, the store is a global in-memory dictionary (`ISSUES`):
 - it **resets on server restart**
@@ -274,20 +336,21 @@ decisions, and audit events survive restarts.
 agentic-triage-copilot/
   .github/workflows/      # CI pipeline (lint + tests)
   apps/
-    api/                 # FastAPI service
+    api/                 # FastAPI service (routes: issues, ingest, analyze, decisions, audit, documents, eval)
   agent/
     analyze/             # deterministic analyzer (current MVP)
-    ingest/              # ingestion/normalization adapters (current MVP)
+    ingest/              # ingestion/normalization adapters (Excel normalizer, etc.)
     schemas/             # Pydantic models (IO contracts)
     tools/               # deterministic checks (planned)
     prompts/             # versioned prompts (planned)
     retrieval/           # RAG ingest + search (planned)
   data/
-    seed/                # synthetic seed tables + docs (planned)
+    seed/                # Excel seed file (rave_export_demo.xlsx)
     goldenset/           # labeled evaluation cases (planned)
+  frontend/              # React app (optional): upload, issues, detail, audit
   infra/                 # docker / db / migrations (path included)
   eval/                  # evaluation harness (planned)
-  scripts/               # runnable demo scripts
+  scripts/               # demo scripts, ingest_from_excel.py, generate_seed_excel.py
 ```
 
 ## Roadmap (production target)

@@ -1,9 +1,11 @@
 import json
 import logging
+import os
 import time
 from uuid import uuid4
 
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -13,11 +15,22 @@ from apps.api.routes.audit import router as audit_router
 from apps.api.routes.decisions import router as decisions_router
 from apps.api.routes.documents import router as documents_router
 from apps.api.routes.eval import router as eval_router
+from apps.api.routes.ingest import router as ingest_router
 from apps.api.routes.issues import router as issues_router
 
 # FastAPI application instance.
 # FastAPI discovers routes attached to this app object.
 app = FastAPI(title="Agentic Triage Copilot")
+
+# CORS: allow React dev server (and configured origins) to call the API.
+_cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _cors_origins.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key"],
+)
 
 # Logger for request-level structured logs.
 # In production you would configure handlers/formatters (JSON logs, log shipping, etc.).
@@ -57,6 +70,7 @@ async def correlation_id_middleware(request: Request, call_next) -> Response:
 # Keeping routers in separate files is a clean-architecture pattern:
 # - main.py stays small and readable
 # - each router focuses on one area (issues/analyze/decisions/audit/eval)
+app.include_router(ingest_router)
 app.include_router(issues_router)
 app.include_router(analyze_router)
 app.include_router(decisions_router)

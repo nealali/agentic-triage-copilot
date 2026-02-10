@@ -23,10 +23,36 @@ A **test** is code that verifies your application works correctly. Think of it l
 - If the test fails ❌, something is broken
 
 ### What Are We Testing?
-Our tests verify that the **Issues API** works correctly:
-1. **Creating an issue** - Can we POST a new issue and get it back?
-2. **Listing issues** - Can we GET all issues and see the ones we created?
-3. **Error handling** - Do we get a 404 error when requesting a non-existent issue?
+This repo started with simple “issues” tests and now includes a more realistic workflow suite:
+
+1. **Issues API**
+   - Create issues
+   - List issues
+   - Retrieve by ID (404 behavior)
+2. **Analyze workflow**
+   - Deterministic analysis creates an `AgentRun`
+   - Issue status transitions to `triaged`
+   - Audit events are created and correlation IDs are propagated
+   - Analyze supports `rules_version` and `replay_of_run_id` metadata
+3. **Human decisions**
+   - Decisions are tied to a `run_id` (auditability)
+   - Overrides require a reason (schema validation)
+4. **Audit + evaluation exports**
+   - Audit query filters by issue_id and run_id
+   - Scorecard export returns structured rows for evaluation/QA
+5. **Documents (RAG-lite)**
+   - Ingest guidance documents
+   - Keyword search guidance docs
+   - Analyzer attaches citation doc IDs to recommendations
+6. **Excel ingestion**
+   - Normalizer `from_excel_row` maps Excel columns to `IssueCreate` and `evidence_payload`
+   - **POST `/ingest/issues`** accepts an `.xlsx` file and creates issues; test uploads fixture and asserts created count and that GET /issues includes new IDs (`apps/api/tests/test_excel_ingest.py`)
+7. **Optional API-key auth (feature-flagged)**
+   - When enabled, mutation endpoints require `X-API-Key`
+   - Reviewer spoofing is prevented on decisions
+8. **Storage backends**
+   - Default in-memory backend (fast MVP)
+   - Postgres backend tested in CI against a real Postgres container
 
 ### Why Use pytest?
 **pytest** is a professional testing framework used by millions of Python developers. It:
@@ -52,7 +78,7 @@ Open your terminal and run:
 python --version
 ```
 
-You should see something like `Python 3.13.2`. If you get an error, install Python from [python.org](https://www.python.org/downloads/).
+You should see a Python version string. This repo also includes a `.python-version` file as a recommended version pin.
 
 ---
 
@@ -114,10 +140,10 @@ source .venv/bin/activate
 Install all required packages:
 
 ```powershell
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-**What this does**: Reads `requirements.txt` and installs all listed packages (fastapi, pytest, etc.) into your virtual environment.
+**What this does**: Installs runtime + dev tooling so your local runs match CI.
 
 **Expected output**: You'll see packages being downloaded and installed. It may take 30-60 seconds.
 
@@ -128,6 +154,9 @@ pip install -r requirements.txt
 - `httpx` - HTTP client library (used by FastAPI's TestClient)
 - `pydantic` - Data validation library
 - `python-dotenv` - For loading `.env` files
+- `ruff` - Fast linter (CI lint step)
+- `black` - Formatter (CI format check step)
+- `SQLAlchemy` / `psycopg` / `alembic` - DB/persistence path + Postgres backend support
 
 ### Step 5: Verify Installation
 
@@ -143,12 +172,14 @@ You should see something like `pytest 7.4.0` or similar.
 
 ## Running the Tests
 
-### Basic Test Run
+### Recommended (match CI)
 
-Run all tests in the test file:
+Run the same checks CI runs:
 
 ```powershell
-pytest apps/api/tests/test_issues.py
+ruff check .
+black --check .
+pytest -q
 ```
 
 **What this does**: 
@@ -248,50 +279,16 @@ AssertionError: assert 404 == 200
 
 ## Verifying System Behavior
 
-### What Each Test Verifies
+### What the workflow tests verify (why they matter)
+The workflow suite (for example, `apps/api/tests/test_workflow.py`) is closer to how the system is used in real
+clinical programming / data management workflows:
+- **Create → Analyze → Decide → Audit → Eval**
+- Ensures the system is not only “up”, but **behaves correctly as a decision workflow**
 
-#### Test 1: `test_create_issue_then_get_by_id_returns_it`
-**What it tests**: Can we create an issue and then retrieve it?
-
-**Steps the test performs**:
-1. Creates a test HTTP client
-2. Sends a POST request to `/issues` with issue data
-3. Verifies the response is 200 (success)
-4. Extracts the `issue_id` from the response
-5. Sends a GET request to `/issues/{issue_id}`
-6. Verifies we get back the same issue with matching data
-
-**What "passing" means**: 
-- ✅ The API can create issues
-- ✅ The API can retrieve issues by ID
-- ✅ Data is stored correctly
-
-#### Test 2: `test_list_issues_includes_created_issues`
-**What it tests**: Can we list all issues and see the ones we created?
-
-**Steps the test performs**:
-1. Creates two different issues
-2. Gets their IDs
-3. Requests all issues via GET `/issues`
-4. Verifies both created issues appear in the list
-
-**What "passing" means**:
-- ✅ The API can list all issues
-- ✅ Created issues appear in the list
-- ✅ Multiple issues can coexist
-
-#### Test 3: `test_get_unknown_issue_returns_404`
-**What it tests**: Does the API handle missing issues correctly?
-
-**Steps the test performs**:
-1. Generates a random UUID (that doesn't exist)
-2. Tries to GET that issue
-3. Verifies we get a 404 (Not Found) error
-
-**What "passing" means**:
-- ✅ The API handles errors correctly
-- ✅ Users get appropriate error messages
-- ✅ The system doesn't crash on invalid requests
+The document tests (for example, `apps/api/tests/test_documents.py`) verify the “RAG-lite” path:
+- ingest guidance documents
+- search guidance deterministically
+- attach citations during analysis
 
 ### Manual Verification (Optional)
 
@@ -323,7 +320,7 @@ You can also test the API manually:
 
 **Solution**: Make sure you:
 1. Activated your virtual environment (see Step 3)
-2. Installed dependencies (`pip install -r requirements.txt`)
+2. Installed dependencies (`pip install -r requirements.txt -r requirements-dev.txt`)
 
 ### Problem: "ModuleNotFoundError: No module named 'fastapi'"
 
@@ -344,6 +341,19 @@ pytest apps/api/tests/test_issues.py
 **Solution**: Use verbose mode with output:
 ```powershell
 pytest apps/api/tests/test_issues.py -v -s
+```
+
+### Problem: “CI Postgres job fails but local tests pass”
+**Why it happens**: SQLite and Postgres differ (types, JSON behavior, query semantics).
+
+**Solution**: run the suite locally against Postgres:
+
+```powershell
+docker compose -f .\infra\docker-compose.yml up -d
+$env:STORAGE_BACKEND="postgres"
+$env:DATABASE_URL="postgresql+psycopg://app:app@localhost:5432/triage"
+$env:AUTO_CREATE_SCHEMA="1"
+pytest -q
 ```
 
 ### Problem: One test fails but others pass
@@ -392,7 +402,7 @@ pytest apps/api/tests/test_issues.py -v -s
 Once your tests are passing:
 
 1. **Add more tests** as you add features
-2. **Set up CI/CD** to run tests automatically
+2. **Keep CI green** (ruff + black + pytest, plus the Postgres-backed job)
 3. **Add test coverage reporting** to see which code is tested
 4. **Write integration tests** for full workflows
 5. **Add performance tests** for load testing
@@ -413,10 +423,12 @@ Running tests professionally means:
 # Setup (one time)
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 
 # Run tests (every time you make changes)
-pytest apps/api/tests/test_issues.py -v
+ruff check .
+black --check .
+pytest -q
 ```
 
 Happy testing! 🧪

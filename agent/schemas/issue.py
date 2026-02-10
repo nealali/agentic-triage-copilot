@@ -112,6 +112,12 @@ class IssueCreate(BaseModel):
     )
 
 
+class IssueStatusUpdate(BaseModel):
+    """Request body for PATCH /issues/{issue_id} to change status (e.g. close issue)."""
+
+    status: IssueStatus = Field(..., description="New status (open, triaged, closed).")
+
+
 class Issue(BaseModel):
     """
     Stored/returned issue model.

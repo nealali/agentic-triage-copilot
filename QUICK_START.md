@@ -1,64 +1,73 @@
-# Quick Start Guide - Running Tests
+# Quick Start Guide (developer workflow)
 
-## Option 1: Automated Script (Easiest)
+This guide is the fastest way to verify the repo is healthy on your machine.
+For deeper explanations (what pytest is, how to interpret failures), see `TESTING_GUIDE.md`.
 
-Simply run the PowerShell script:
+## Option 1: One-command test run (recommended)
 
 ```powershell
 .\run_tests.ps1
 ```
 
-This script will:
-- ✅ Create a virtual environment if needed
-- ✅ Install dependencies automatically
-- ✅ Run all tests with detailed output
+What it does:
+- Creates/uses `.venv`
+- Installs dependencies
+- Runs `pytest`
 
-## Option 2: Manual Steps
+## Option 2: Manual setup (PowerShell)
 
-### 1. Create and activate virtual environment
+### 1) Create + activate a virtual environment
 
 ```powershell
-# Create virtual environment
+cd c:\dev\agentic-triage-copilot
 python -m venv .venv
-
-# Activate it
 .venv\Scripts\Activate.ps1
 ```
 
-### 2. Install dependencies
+### 2) Install dependencies (match CI)
 
 ```powershell
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-### 3. Run tests
+### 3) Run quality checks (what CI runs)
 
 ```powershell
-pytest apps/api/tests/test_issues.py -v
+ruff check .
+black --check .
+python -m pytest -q
 ```
 
-## Expected Output
+## What tests exist today (high level)
+- **API workflow tests**: issues → analyze → decisions → audit → eval
+- **Document tests (RAG-lite)**: ingest docs, keyword search, citations added during analyze
+- **Excel ingest tests**: normalizer `from_excel_row` and **POST `/ingest/issues`** (upload fixture Excel, assert created count and GET /issues).
+- **Auth tests (optional feature flag)**: API-key auth on mutations, reviewer spoof prevention
+- **Postgres backend tests**:
+  - unit round-trip via SQLite
+  - CI job runs the suite against a real Postgres container
 
-When everything works, you should see:
+## Optional: Excel ingestion and full app
+- **Ingest script**: from repo root, `python scripts/ingest_from_excel.py` (default: `data/seed/rave_export_demo.xlsx`). Use `--dry-run` to validate without POSTing. See README “Excel ingestion” for column schema and API upload.
+- **Full app (React)**: optional UI in `frontend/`. See README “Full app (React)” for `npm install`, `npm run dev`, and `VITE_API_BASE_URL`.
 
+## Optional: run tests against Postgres locally
+1) Start Postgres (Docker):
+
+```powershell
+docker compose -f .\infra\docker-compose.yml up -d
 ```
-========================= test session starts =========================
-platform win32 -- Python 3.13.2, pytest-7.4.0, pluggy-1.3.0
-collected 3 items
 
-apps/api/tests/test_issues.py::test_create_issue_then_get_by_id_returns_it PASSED [ 33%]
-apps/api/tests/test_issues.py::test_list_issues_includes_created_issues PASSED [ 66%]
-apps/api/tests/test_issues.py::test_get_unknown_issue_returns_404 PASSED [100%]
+2) Enable Postgres backend and run tests:
 
-========================= 3 passed in 0.15s =========================
+```powershell
+$env:STORAGE_BACKEND="postgres"
+$env:DATABASE_URL="postgresql+psycopg://app:app@localhost:5432/triage"
+$env:AUTO_CREATE_SCHEMA="1"
+python -m pytest -q
 ```
 
-**3 passed** = ✅ All tests are working correctly!
-
-## Troubleshooting
-
-- **"pytest: command not found"** → Make sure virtual environment is activated
-- **"ModuleNotFoundError"** → Run `pip install -r requirements.txt`
-- **Tests fail** → Read the error message - it tells you what went wrong
-
-For detailed explanations, see [TESTING_GUIDE.md](TESTING_GUIDE.md).
+## Troubleshooting (fast fixes)
+- **`pytest` not found**: activate `.venv`
+- **`ModuleNotFoundError`**: reinstall deps with `pip install -r requirements.txt -r requirements-dev.txt`
+- **Black/ruff fails in CI**: run `black .` and `ruff check . --fix` locally, then re-check with `--check`

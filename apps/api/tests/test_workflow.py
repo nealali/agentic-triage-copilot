@@ -193,6 +193,38 @@ def test_post_decision_override_without_reason_fails_validation_422() -> None:
     assert dec_res.status_code == 422
 
 
+def test_post_decision_on_closed_issue_returns_400() -> None:
+    """Closed issues must not accept new decisions."""
+    client = TestClient(app)
+
+    issue = _create_issue(
+        client,
+        description="Some issue.",
+        evidence_payload={},
+    )
+    issue_id = issue["issue_id"]
+
+    run_res = client.post(f"/issues/{issue_id}/analyze")
+    assert run_res.status_code == 200
+    run = run_res.json()
+
+    # Close the issue via PATCH
+    patch_res = client.patch(f"/issues/{issue_id}", json={"status": "closed"})
+    assert patch_res.status_code == 200
+    assert patch_res.json()["status"] == "closed"
+
+    decision_payload = {
+        "run_id": run["run_id"],
+        "decision_type": "APPROVE",
+        "final_action": "QUERY_SITE",
+        "final_text": "Would send query.",
+        "reviewer": "jdoe",
+    }
+    dec_res = client.post(f"/issues/{issue_id}/decisions", json=decision_payload)
+    assert dec_res.status_code == 400
+    assert "closed" in dec_res.json().get("detail", "").lower()
+
+
 def test_audit_endpoint_returns_events_after_analyze_and_decision() -> None:
     client = TestClient(app)
 
@@ -231,6 +263,35 @@ def test_audit_endpoint_returns_events_after_analyze_and_decision() -> None:
     assert audit_run_res.status_code == 200
     run_events = audit_run_res.json()
     assert all(e.get("run_id") == run["run_id"] for e in run_events if e.get("run_id") is not None)
+
+
+def test_decision_ignore_emits_issue_closed_audit_event() -> None:
+    """Recording a decision with IGNORE should emit ISSUE_CLOSED in the audit log."""
+    client = TestClient(app)
+
+    issue = _create_issue(
+        client,
+        description="Will be closed.",
+        evidence_payload={},
+    )
+    issue_id = issue["issue_id"]
+    run = client.post(f"/issues/{issue_id}/analyze").json()
+    decision_payload = {
+        "run_id": run["run_id"],
+        "decision_type": "APPROVE",
+        "final_action": "IGNORE",
+        "final_text": "No action needed.",
+        "reviewer": "jdoe",
+    }
+    assert client.post(f"/issues/{issue_id}/decisions", json=decision_payload).status_code == 200
+
+    audit_res = client.get(f"/audit?issue_id={issue_id}")
+    assert audit_res.status_code == 200
+    events = audit_res.json()
+    assert any(e["event_type"] == "ISSUE_CLOSED" for e in events), "Expected ISSUE_CLOSED in audit"
+    closed = next(e for e in events if e["event_type"] == "ISSUE_CLOSED")
+    assert closed["actor"] == "jdoe"
+    assert closed.get("details", {}).get("reason") == "No action needed."
 
 
 def test_eval_scorecard_returns_rows_including_rule_fired() -> None:

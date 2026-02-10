@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 
-from agent.schemas.issue import Issue, IssueCreate
+from agent.schemas.issue import Issue, IssueCreate, IssueStatusUpdate
 from agent.schemas.run import AgentRunSummary
 from agent.schemas.views import IssueOverview
 from apps.api import storage
@@ -52,6 +52,22 @@ def get_issue(issue_id: UUID) -> Issue:
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
 
+    return issue
+
+
+@router.patch("/{issue_id}", response_model=Issue)
+def update_issue_status(issue_id: UUID, body: IssueStatusUpdate) -> Issue:
+    """
+    Update an issue's status (e.g. open → triaged → closed).
+
+    What this endpoint does:
+    - Updates the issue status in the store.
+    - Writes an audit event (ISSUE_UPDATED).
+    - Returns the updated issue or 404 if not found.
+    """
+    issue = storage.BACKEND.update_issue_status(issue_id, body.status)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
     return issue
 
 

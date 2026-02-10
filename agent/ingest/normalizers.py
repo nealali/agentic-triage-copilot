@@ -58,6 +58,72 @@ def from_edc_check(payload: dict[str, Any]) -> IssueCreate:
     )
 
 
+# Columns that map directly to IssueCreate (case-insensitive key).
+_ISSUE_KEYS = {"source", "domain", "subject_id", "fields", "description"}
+# Columns that go into evidence_payload (optional); any other column also goes there.
+_EVIDENCE_KEYS = {
+    "start_date",
+    "end_date",
+    "variable",
+    "value",
+    "reference",
+    "notes",
+}
+
+
+def _normalize_key(k: str) -> str:
+    """Normalize Excel column to lowercase with underscores."""
+    return k.strip().lower().replace(" ", "_")
+
+
+def from_excel_row(row: dict[str, Any]) -> IssueCreate:
+    """
+    Normalize a single Excel row (e.g. from RAVE/QC export) into IssueCreate.
+
+    Expected columns (case-insensitive): Source, Domain, Subject_ID, Fields,
+    Description. Optional: Start_Date, End_Date, Variable, Value, Reference, Notes
+    (and any other columns) are merged into evidence_payload.
+
+    - Source must be edit_check or listing; default edit_check.
+    - Fields can be comma-separated string or list.
+    """
+    normalized = {_normalize_key(k): v for k, v in row.items() if v is not None and v != ""}
+    # Build evidence from optional + any extra columns
+    evidence: dict[str, Any] = {}
+    for k, v in normalized.items():
+        if k in _ISSUE_KEYS:
+            continue
+        if k in _EVIDENCE_KEYS or k not in _ISSUE_KEYS:
+            evidence[k] = v
+
+    source_raw = str(normalized.get("source", "edit_check")).strip().lower()
+    source = (
+        IssueSource.EDIT_CHECK
+        if source_raw == "edit_check"
+        else IssueSource.LISTING
+        if source_raw == "listing"
+        else IssueSource.EDIT_CHECK
+    )
+    domain = IssueDomain(str(normalized.get("domain", "AE")).strip().upper())
+    subject_id = str(normalized.get("subject_id", "")).strip()
+    fields_raw = normalized.get("fields", [])
+    if isinstance(fields_raw, str):
+        fields = [f.strip() for f in fields_raw.split(",") if f.strip()]
+    else:
+        fields = [str(f).strip() for f in fields_raw if f]
+    description = str(normalized.get("description", "")).strip()
+    if not description:
+        description = "No description"
+    return IssueCreate(
+        source=source,
+        domain=domain,
+        subject_id=subject_id,
+        fields=fields,
+        description=description,
+        evidence_payload=evidence,
+    )
+
+
 def from_sas_listing(payload: dict[str, Any]) -> IssueCreate:
     """
     Normalize a mock "SAS QC listing" payload into IssueCreate.

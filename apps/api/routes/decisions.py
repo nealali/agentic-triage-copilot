@@ -11,6 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from agent.schemas.audit import AuditEventType
 from agent.schemas.decision import Decision, DecisionCreate
 from agent.schemas.issue import IssueStatus
 from agent.schemas.recommendation import Action
@@ -45,6 +46,11 @@ def create_decision(
     issue = storage.BACKEND.get_issue(issue_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
+    if issue.status == IssueStatus.CLOSED:
+        raise HTTPException(
+            status_code=400,
+            detail="Issue is closed; no further decisions can be recorded.",
+        )
 
     # If auth is enabled, do not trust "reviewer" coming from the request body.
     # Enforce that the authenticated user matches the recorded reviewer.
@@ -60,6 +66,13 @@ def create_decision(
     # Status transition rule (simple MVP behavior)
     if decision.final_action == Action.IGNORE:
         storage.BACKEND.update_issue_status(issue_id, IssueStatus.CLOSED)
+        storage.BACKEND.add_audit_event(
+            event_type=AuditEventType.ISSUE_CLOSED,
+            actor=decision.reviewer,
+            issue_id=issue_id,
+            run_id=decision.run_id,
+            details={"reason": decision.final_text or decision.reason or ""},
+        )
     else:
         storage.BACKEND.update_issue_status(issue_id, IssueStatus.TRIAGED)
 
