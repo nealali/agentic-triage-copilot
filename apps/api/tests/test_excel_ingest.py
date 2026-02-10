@@ -70,7 +70,8 @@ def test_ingest_api_accepts_excel_and_creates_issues() -> None:
 
     from apps.api.main import app
 
-    seed_path = Path(__file__).resolve().parent.parent.parent.parent / "data" / "seed" / "rave_export_demo.xlsx"
+    root = Path(__file__).resolve().parents[3]
+    seed_path = root / "data" / "seed" / "rave_export_demo.xlsx"
     if not seed_path.is_file():
         return  # skip if seed not generated
     client = TestClient(app)
@@ -78,7 +79,13 @@ def test_ingest_api_accepts_excel_and_creates_issues() -> None:
         content = f.read()
     r = client.post(
         "/ingest/issues",
-        files={"file": ("rave_export_demo.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        files={
+            "file": (
+                "rave_export_demo.xlsx",
+                content,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
     )
     assert r.status_code == 200
     data = r.json()

@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from agent.ingest.normalizers import from_excel_row
-from agent.schemas.issue import IssueCreate
 from apps.api import storage
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])

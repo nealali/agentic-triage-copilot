@@ -100,9 +100,7 @@ def from_excel_row(row: dict[str, Any]) -> IssueCreate:
     source = (
         IssueSource.EDIT_CHECK
         if source_raw == "edit_check"
-        else IssueSource.LISTING
-        if source_raw == "listing"
-        else IssueSource.EDIT_CHECK
+        else IssueSource.LISTING if source_raw == "listing" else IssueSource.EDIT_CHECK
     )
     domain = IssueDomain(str(normalized.get("domain", "AE")).strip().upper())
     subject_id = str(normalized.get("subject_id", "")).strip()

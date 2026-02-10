@@ -23,6 +23,7 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 def _load_openpyxl():
     try:
         import openpyxl
+
         return openpyxl
     except ImportError:
         print("Install openpyxl: pip install openpyxl", file=sys.stderr)
