@@ -6,3 +6,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+# Only collect tests from apps/api/tests (exclude scripts/ which has integration scripts, not pytest tests)
+testpaths = ["apps/api/tests"]
