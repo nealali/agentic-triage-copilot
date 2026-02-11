@@ -79,6 +79,7 @@ class StorageBackend(Protocol):
     def append_run(self, issue_id: UUID, run: AgentRun) -> None: ...
     def list_runs(self, issue_id: UUID) -> list[AgentRun]: ...
     def list_run_summaries(self, issue_id: UUID) -> list[AgentRunSummary]: ...
+    def get_run(self, issue_id: UUID, run_id: UUID) -> AgentRun | None: ...
     def runs_by_issue(self) -> dict[UUID, list[AgentRun]]: ...
 
     def append_decision(self, issue_id: UUID, decision_create: DecisionCreate) -> Decision: ...
@@ -103,6 +104,7 @@ class StorageBackend(Protocol):
     # -------------------------
     def ingest_document(self, document_create: DocumentCreate) -> Document: ...
     def get_document(self, doc_id: UUID) -> Document | None: ...
+    def list_documents(self) -> list[Document]: ...
     def search_documents(self, *, query: str, limit: int = 10) -> list[DocumentHit]: ...
 
 
@@ -137,6 +139,9 @@ class InMemoryStorageBackend:
 
     def list_run_summaries(self, issue_id: UUID) -> list[AgentRunSummary]:
         return list_run_summaries(issue_id)
+
+    def get_run(self, issue_id: UUID, run_id: UUID) -> AgentRun | None:
+        return get_run(issue_id, run_id)
 
     def runs_by_issue(self) -> dict[UUID, list[AgentRun]]:
         # Return the underlying in-memory mapping.
@@ -173,6 +178,9 @@ class InMemoryStorageBackend:
 
     def get_document(self, doc_id: UUID) -> Document | None:
         return get_document(doc_id)
+
+    def list_documents(self) -> list[Document]:
+        return list_documents()
 
     def search_documents(self, *, query: str, limit: int = 10) -> list[DocumentHit]:
         return search_documents(query=query, limit=limit)
@@ -262,6 +270,7 @@ class PostgresStorageBackend:
             Column("subject_id", String(128), nullable=False),
             Column("fields", JSON, nullable=False),
             Column("description", Text, nullable=False),
+            Column("issue_type", String(32), nullable=False, server_default="deterministic"),
             Column("evidence_payload", JSON, nullable=False),
         )
 
@@ -342,6 +351,7 @@ class PostgresStorageBackend:
                     subject_id=issue.subject_id,
                     fields=issue.fields,
                     description=issue.description,
+                    issue_type=issue.issue_type.value,
                     evidence_payload=issue.evidence_payload,
                 )
             )
@@ -362,7 +372,16 @@ class PostgresStorageBackend:
     def list_issues(self) -> list[Issue]:
         with self._engine.begin() as conn:
             rows = conn.execute(self._select(self._issues)).mappings().all()
-        return [Issue(**dict(r)) for r in rows]
+        issues = []
+        for r in rows:
+            row_dict = dict(r)
+            # Convert issue_type string back to enum if present
+            if "issue_type" in row_dict and isinstance(row_dict["issue_type"], str):
+                from agent.schemas.issue import IssueType
+
+                row_dict["issue_type"] = IssueType(row_dict["issue_type"])
+            issues.append(Issue(**row_dict))
+        return issues
 
     def get_issue(self, issue_id: UUID) -> Issue | None:
         with self._engine.begin() as conn:
@@ -375,7 +394,15 @@ class PostgresStorageBackend:
                 .mappings()
                 .first()
             )
-        return Issue(**dict(row)) if row else None
+        if not row:
+            return None
+        row_dict = dict(row)
+        # Convert issue_type string back to enum if present
+        if "issue_type" in row_dict and isinstance(row_dict["issue_type"], str):
+            from agent.schemas.issue import IssueType
+
+            row_dict["issue_type"] = IssueType(row_dict["issue_type"])
+        return Issue(**row_dict)
 
     def update_issue_status(self, issue_id: UUID, status: IssueStatus) -> Issue | None:
         with self._engine.begin() as conn:
@@ -421,6 +448,19 @@ class PostgresStorageBackend:
 
     def list_run_summaries(self, issue_id: UUID) -> list[AgentRunSummary]:
         return [AgentRunSummary.from_run(r) for r in self.list_runs(issue_id)]
+
+    def get_run(self, issue_id: UUID, run_id: UUID) -> AgentRun | None:
+        with self._engine.begin() as conn:
+            row = (
+                conn.execute(
+                    self._select(self._runs)
+                    .where(self._runs.c.issue_id == self._bind_uuid(issue_id))
+                    .where(self._runs.c.run_id == self._bind_uuid(run_id))
+                )
+                .mappings()
+                .first()
+            )
+        return AgentRun(**dict(row)) if row else None
 
     def runs_by_issue(self) -> dict[UUID, list[AgentRun]]:
         runs_by: dict[UUID, list[AgentRun]] = {}
@@ -575,6 +615,12 @@ class PostgresStorageBackend:
             )
         return Document(**dict(row)) if row else None
 
+    def list_documents(self) -> list[Document]:
+        """List all documents (for semantic RAG search)."""
+        with self._engine.begin() as conn:
+            rows = conn.execute(self._select(self._documents)).mappings().all()
+        return [Document(**dict(r)) for r in rows]
+
     def search_documents(self, *, query: str, limit: int = 10) -> list[DocumentHit]:
         """
         Simple keyword search over documents (RAG-lite).
@@ -709,6 +755,11 @@ def get_document(doc_id: UUID) -> Document | None:
     """Return a document by ID, or None if not found."""
 
     return DOCUMENTS.get(doc_id)
+
+
+def list_documents() -> list[Document]:
+    """List all documents (for semantic RAG search)."""
+    return list(DOCUMENTS.values())
 
 
 def search_documents(*, query: str, limit: int = 10) -> list[DocumentHit]:

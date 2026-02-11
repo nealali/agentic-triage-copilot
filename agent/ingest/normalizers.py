@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.classify.classifier import classify_issue
 from agent.schemas.issue import IssueCreate, IssueDomain, IssueSource
 
 
@@ -48,12 +49,23 @@ def from_edc_check(payload: dict[str, Any]) -> IssueCreate:
     #   "evidence": {"start_date": "...", "end_date": "..."}
     # }
 
+    issue_create_temp = IssueCreate(
+        source=IssueSource.EDIT_CHECK,
+        domain=IssueDomain(payload.get("domain", "AE")),
+        subject_id=str(payload.get("subject_id", "")),
+        fields=list(payload.get("fields", [])),
+        description=str(payload.get("message", "")),
+        evidence_payload=dict(payload.get("evidence", {})),
+    )
+    # Automatically classify the issue
+    issue_type = classify_issue(issue_create_temp)
     return IssueCreate(
         source=IssueSource.EDIT_CHECK,
         domain=IssueDomain(payload.get("domain", "AE")),
         subject_id=str(payload.get("subject_id", "")),
         fields=list(payload.get("fields", [])),
         description=str(payload.get("message", "")),
+        issue_type=issue_type,
         evidence_payload=dict(payload.get("evidence", {})),
     )
 
@@ -112,12 +124,28 @@ def from_excel_row(row: dict[str, Any]) -> IssueCreate:
     description = str(normalized.get("description", "")).strip()
     if not description:
         description = "No description"
+
+    # Create IssueCreate with temporary issue_type (will be classified)
+    issue_create_temp = IssueCreate(
+        source=source,
+        domain=domain,
+        subject_id=subject_id,
+        fields=fields,
+        description=description,
+        evidence_payload=evidence,
+    )
+
+    # Automatically classify the issue
+    issue_type = classify_issue(issue_create_temp)
+
+    # Create final IssueCreate with classified type
     return IssueCreate(
         source=source,
         domain=domain,
         subject_id=subject_id,
         fields=fields,
         description=description,
+        issue_type=issue_type,
         evidence_payload=evidence,
     )
 
@@ -141,12 +169,26 @@ def from_sas_listing(payload: dict[str, Any]) -> IssueCreate:
     #   "rows": [{"LBSTRESN": 9999, "visit": "V1"}]
     # }
 
+    issue_create_temp = IssueCreate(
+        source=IssueSource.LISTING,
+        domain=IssueDomain(payload.get("domain", "LB")),
+        subject_id=str(payload.get("subject", "")),
+        fields=list(payload.get("fields", [])),
+        description=str(payload.get("finding", "")),
+        evidence_payload={
+            "rows": payload.get("rows", []),
+            "listing_name": payload.get("listing_name"),
+        },
+    )
+    # Automatically classify the issue
+    issue_type = classify_issue(issue_create_temp)
     return IssueCreate(
         source=IssueSource.LISTING,
         domain=IssueDomain(payload.get("domain", "LB")),
         subject_id=str(payload.get("subject", "")),
         fields=list(payload.get("fields", [])),
         description=str(payload.get("finding", "")),
+        issue_type=issue_type,
         evidence_payload={
             "rows": payload.get("rows", []),
             "listing_name": payload.get("listing_name"),

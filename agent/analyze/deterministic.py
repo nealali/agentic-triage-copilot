@@ -231,9 +231,21 @@ def _build_query_site_message(issue: Issue) -> str:
     """
 
     fields_str = ", ".join(issue.fields) if issue.fields else "(unspecified fields)"
+
+    # Include evidence values if available
+    evidence_context = ""
+    if issue.evidence_payload:
+        value_parts = []
+        if "value" in issue.evidence_payload and issue.evidence_payload["value"]:
+            value_parts.append(f"value: {issue.evidence_payload['value']}")
+        if "reference" in issue.evidence_payload and issue.evidence_payload["reference"]:
+            value_parts.append(f"reference: {issue.evidence_payload['reference']}")
+        if value_parts:
+            evidence_context = f" ({', '.join(value_parts)})"
+
     return (
         f"Subject {issue.subject_id}: Please review the following potential issue "
-        f"in {issue.domain} for fields [{fields_str}]. {issue.description} "
+        f"in {issue.domain} for fields [{fields_str}]{evidence_context}. {issue.description} "
         "Kindly confirm and/or provide clarification/corrections as appropriate."
     )
 
@@ -242,9 +254,21 @@ def _build_data_fix_message(issue: Issue) -> str:
     """Template for an internal data-fix note."""
 
     fields_str = ", ".join(issue.fields) if issue.fields else "(unspecified fields)"
+
+    # Include evidence values if available
+    evidence_context = ""
+    if issue.evidence_payload:
+        value_parts = []
+        if "value" in issue.evidence_payload and issue.evidence_payload["value"]:
+            value_parts.append(f"current value: {issue.evidence_payload['value']}")
+        if "notes" in issue.evidence_payload and issue.evidence_payload["notes"]:
+            value_parts.append(f"notes: {issue.evidence_payload['notes']}")
+        if value_parts:
+            evidence_context = f" ({', '.join(value_parts)})"
+
     return (
         f"Recommended data fix for subject {issue.subject_id} in {issue.domain} "
-        f"for fields [{fields_str}]. Review the evidence payload and apply a consistent correction."
+        f"for fields [{fields_str}]{evidence_context}. Review the evidence payload and apply a consistent correction."
     )
 
 
@@ -384,9 +408,9 @@ def analyze_issue(issue: Issue) -> AgentRecommendation:
     }
     return AgentRecommendation(
         severity=Severity.LOW,
-        action=Action.MEDICAL_REVIEW,
+        action=Action.OTHER,
         confidence=0.3,
-        rationale="Insufficient deterministic signals to make a strong recommendation.",
+        rationale="Insufficient deterministic signals to make a strong recommendation. Manual review required to determine appropriate action.",
         missing_info=[
             "Confirm which records/visits are impacted.",
             "Provide relevant start/end dates or measurement values.",

@@ -30,10 +30,22 @@ This system is intended to integrate with the tools you already use (not replace
 
 ## Key capabilities (enterprise-style)
 ### Deterministic-first “facts” layer
-Anything that must be correct and reproducible (ranges, date logic, duplicates, joins, thresholds) should be computed by deterministic tools (rules/SQL/pandas), then summarized.
+Anything that must be correct and reproducible (ranges, date logic, duplicates, joins, thresholds) should be computed by deterministic tools (rules/SQL/pandas), then summarized. This layer **always runs** and provides the base recommendation.
+
+### LLM enhancement (optional)
+When enabled (`LLM_ENABLED=1`), the system enhances deterministic recommendations with LLM reasoning:
+- More nuanced rationales and context-aware analysis
+- Better draft message generation
+- Handles edge cases and ambiguous descriptions
+- Falls back gracefully if LLM is unavailable
+- Stores model version and prompt version for auditability
 
 ### Evidence-grounded reasoning (RAG)
 Recommendations should be grounded in enterprise documentation (Data Review Plan, edit check specs, query writing guides). The goal is: **no policy claims without citations**.
+
+**RAG modes:**
+- **Keyword search** (default): Simple, explainable term-based search
+- **Semantic search** (`RAG_SEMANTIC=1`): Embedding-based semantic search using sentence-transformers for better relevance
 
 ### Human-in-the-loop decisions
 The system should support approve/override/edit workflows with required rationale for overrides and a clear record of “model suggestion vs human decision.”
@@ -58,7 +70,10 @@ This repository currently includes an MVP foundation:
   - Optional: Postgres persistence via `PostgresStorageBackend` (enabled by env vars)
   - Uses SQLAlchemy Core (not ORM) for a simple, explicit storage layer
   - UUIDs are stored as native UUIDs on Postgres; SQLite tests store UUIDs as strings for portability
-- **Deterministic analyzer** (`agent/analyze/deterministic.py`) to produce structured recommendations (no LLM)
+- **Deterministic analyzer** (`agent/analyze/deterministic.py`) to produce structured recommendations (rule-based)
+- **LLM analyzer** (`agent/analyze/llm.py`) for optional LLM enhancement (OpenAI integration, configurable)
+- **Semantic RAG** (`agent/retrieval/rag.py`) for embedding-based document retrieval (sentence-transformers)
+- **Automatic issue classification** (`agent/classify/classifier.py`): classifies issues as `deterministic` or `llm_required` during ingestion. Uses **general rules first** (domain-agnostic keywords/patterns), then **domain-specific refinements**, with **scoring** and optional LLM fallback for uncertain cases (`CLASSIFIER_USE_LLM_FALLBACK`).
 - **Ingestion normalizers** (`agent/ingest/normalizers.py`) to convert source-specific payloads into `IssueCreate`
 - **API routers**:
   - `apps/api/routes/issues.py`
@@ -80,7 +95,7 @@ This repository currently includes an MVP foundation:
   - Tests against a real Postgres service (backend switch via env vars)
 - **Demo automation**: `scripts/demo_flow.ps1`
 - **Excel ingestion**: seed file `data/seed/rave_export_demo.xlsx`, CLI script `scripts/ingest_from_excel.py`, and **POST `/ingest/issues`** for UI upload (see [Excel ingestion](#excel-ingestion) below).
-- **Full app (React)**: optional multi-page UI in `frontend/` for upload, issues list, issue detail, run analyze, record decision, and audit (see [Full app (React)](#full-app-react) below).
+- **Full app (React)**: optional multi-page UI in `frontend/` for upload, issues list, issue detail, run analyze, record decision, Documents list/upload, and audit (see [Full app (React)](#full-app-react) below). For **deterministic** issues the UI defaults to **no LLM** and **no semantic RAG**; for **llm_required** issues both are forced on. A **warning** is shown when no RAG citations were found but the LLM still generated a draft message.
 - **Optional persistence path**:
   - Enable Postgres backend via environment variables (see below)
   - `infra/docker-compose.yml` (Postgres + API)
@@ -93,12 +108,14 @@ This repository currently includes an MVP foundation:
 - **GET `/issues`**: list issues
 - **GET `/issues/{issue_id}`**: fetch a single issue (404 if not found)
 - **GET `/issues/{issue_id}/overview`**: UI-friendly “one call” view (issue + latest run/decision + recent audit)
-- **POST `/issues/{issue_id}/analyze`**: run deterministic analysis and create an AgentRun
-  - Supports an optional JSON body: `{"rules_version": "v0.1", "replay_of_run_id": "<RUN_ID>"}` for versioning/replay linkage
+- **POST `/issues/{issue_id}/analyze`**: run analysis (deterministic + optional LLM + RAG) and create an AgentRun
+  - Optional JSON body: `{"rules_version": "v0.1", "replay_of_run_id": "<RUN_ID>", "llm_model": "gpt-4o-mini", "use_llm": true/false, "use_semantic_rag": true/false}`. For **llm_required** issues the API forces `use_llm` and `use_semantic_rag` regardless of request.
+  - Always runs deterministic analysis first, then RAG (keyword or semantic per request), then LLM enhancement when requested/enabled.
 - **GET `/issues/{issue_id}/runs`**: list analysis runs (summary)
-- **POST `/issues/{issue_id}/decisions`**: record a human decision tied to a run_id
+- **POST `/issues/{issue_id}/decisions`**: record a human decision tied to a run_id. When `final_action` is `OTHER`, a `specify` field (required) describes the specific action taken.
 - **GET `/issues/{issue_id}/decisions`**: list decisions (most recent first)
 - **POST `/documents`**: ingest a guidance document (RAG-lite)
+- **GET `/documents`**: list all ingested RAG documents
 - **GET `/documents/search?q=...`**: keyword search guidance documents
   - Search is **term-based** (query is split into keywords; it does not require the whole phrase to match as one substring)
 - **GET `/documents/{doc_id}`**: fetch a guidance document by ID
@@ -106,17 +123,65 @@ This repository currently includes an MVP foundation:
 - **GET `/audit`**: query audit events (optional `issue_id`, `run_id`)
 - **GET `/eval/scorecard`**: export scorecard rows for runs
 
-### Guidance documents + citations (RAG-lite)
-This repo now supports a small, explainable “RAG-lite” loop:
+### Guidance documents + citations (RAG)
+This repo supports both keyword and semantic RAG:
 
 - You ingest guidance as **documents** (`POST /documents`)
-- The analyzer runs deterministic rules and then does a keyword lookup over documents
+- The analyzer runs deterministic rules, then retrieves relevant documents
+- **Keyword search** (default): Simple term-based search, explainable and fast
+- **Semantic search** (`RAG_SEMANTIC=1`): Embedding-based search using sentence-transformers for better relevance
 - The recommendation includes:
   - `recommendation.citations`: a list of **document IDs** supporting the recommendation
-  - `recommendation.tool_results.citation_hits`: small metadata about retrieved docs (title/source/score)
+  - `recommendation.tool_results.citation_hits`: metadata about retrieved docs (title/source/score)
+  - `recommendation.tool_results.rag_method`: "keyword" or "semantic"
 
-This is intentionally simple (no embeddings yet), but it demonstrates the enterprise idea:
-**“no guidance claims without a citation trail.”**
+**LLM enhancement** (`LLM_ENABLED=1`):
+- Enhances deterministic recommendations with LLM reasoning
+- Requires `OPENAI_API_KEY` environment variable
+- Uses `gpt-4o-mini` by default (configurable via `LLM_MODEL` or request body)
+- Stores model version in `tool_results.llm_model` for auditability
+- Falls back to deterministic-only if LLM unavailable
+
+This demonstrates the enterprise idea: **“no guidance claims without a citation trail, enhanced with AI reasoning when available.”**
+
+### Testing Classification, RAG, and LLM Features
+
+For comprehensive testing of classification, RAG, and LLM features, see **[TESTING_CLASSIFICATION_RAG.md](TESTING_CLASSIFICATION_RAG.md)**.
+
+This guide includes:
+- Testing rule-based classification (deterministic vs LLM-required)
+- Testing LLM fallback for uncertain classifications
+- Testing keyword and semantic RAG
+- Testing LLM enhancement
+- End-to-end workflow testing
+- UI-based testing
+- Troubleshooting guide
+
+### Auto-ingest RAG documents on startup
+Set `AUTO_INGEST_RAG_DOCUMENTS=1` (or `true`/`yes`) to automatically ingest mock RAG documents when the API starts. Existing documents (by title) are skipped. This uses the same document set as `scripts/ingest_mock_documents.py`.
+
+### Mock documents for RAG testing
+A script is provided to ingest sample guidance documents for testing RAG retrieval:
+
+```powershell
+# Preview documents (no API call)
+python scripts/ingest_mock_documents.py --dry-run
+
+# Ingest documents (API must be running)
+python scripts/ingest_mock_documents.py [--base-url http://localhost:8000] [--api-key KEY]
+```
+
+This creates **8 sample documents** covering:
+- **AE date consistency checks** (DRP) - aligns with `AE_DATE_INCONSISTENCY` rule
+- **Missing critical fields** (SDTM_Guide) - aligns with `MISSING_CRITICAL_FIELD` rule
+- **Out of range laboratory values** (Lab_Review_SOP) - aligns with `OUT_OF_RANGE` rule
+- **Duplicate record handling** (Data_Quality_SOP) - aligns with `DUPLICATE_RECORD` rule
+- **Vital signs out of range** (VS_Review_Guide) - for VS domain issues
+- **Query writing best practices** (Query_SOP) - general guidance
+- **Incomplete date handling** (Date_Standards) - for partial dates
+- **Unit conversion consistency** (Units_SOP) - for measurement units
+
+After ingesting, run analyze on issues and check `recommendation.citations` and `recommendation.tool_results.citation_hits` to see which documents were retrieved. If auth is enabled, pass `--api-key`.
 
 ### Excel ingestion
 You can load issues from an Excel file in two ways.
@@ -146,14 +211,14 @@ An optional multi-page UI uses the FastAPI backend for the full triage workflow.
   npm run dev
   ```
   Opens at `http://localhost:5173`. Set `VITE_API_BASE_URL` in `frontend/.env` if the API is not at `http://localhost:8000` (e.g. `VITE_API_BASE_URL=http://localhost:8000`).
-- **Pages**: Upload (Excel file → POST `/ingest/issues`), Issues list (filter by status), Issue detail (overview, Run analyze, Record decision), Audit log. When the backend has **AUTH_ENABLED=1**, use the “API key” control in the nav to set `X-API-Key` (stored in session only).
+- **Pages**: Upload (Excel file → POST `/ingest/issues`), Issues list (filter by status), Issue detail (overview, Run analyze with LLM/semantic RAG checkboxes, Record decision including OTHER + specify), Documents (list RAG documents, search, upload), Audit log. **Deterministic** issues default to unchecked LLM and semantic RAG; **llm_required** issues force both on. A warning appears when no citations were found but the LLM still generated a draft message. When the backend has **AUTH_ENABLED=1**, use the “API key” control in the nav to set `X-API-Key` (stored in session only).
 - **CORS**: The API allows the React dev server by default (`http://localhost:5173`, `http://127.0.0.1:5173`). Override with env: `CORS_ORIGINS` (comma-separated list).
 
 ### Issue data contract (MVP)
 An issue represents a triage unit of work tied to a subject and domain (DM/VS/LB/AE/Commercial/Medical).
 
 - **`source`**: `manual | edit_check | listing`
-- **`domain`**: `DM | VS | LB | AE | COMMERCIAL | MEDICAL`
+- **`domain`**: `DM | VS | LB | AE | CM | COMMERCIAL | MEDICAL`
 - **`subject_id`**: subject identifier (synthetic or real, depending on environment)
 - **`fields`**: list of impacted variables (e.g., `AESTDTC`, `AEENDTC`)
 - **`description`**: human-readable summary of the issue
@@ -263,6 +328,37 @@ ruff check .
 black --check .
 python -m pytest -q
 ```
+
+To fix lint/format then commit and push in one go:
+
+```powershell
+.\scripts\commit_and_push.ps1 -Message "Your commit message"
+# Or commit only (no push): .\scripts\commit_and_push.ps1 -NoPush
+```
+
+## Optional: LLM enhancement and semantic RAG
+This repo supports optional LLM-powered analysis and semantic document retrieval.
+
+### Enable LLM enhancement
+1. Set environment variables:
+   ```powershell
+   $env:LLM_ENABLED="1"
+   $env:OPENAI_API_KEY="sk-..."
+   $env:CLASSIFIER_USE_LLM_FALLBACK="1"  # Optional: use LLM for uncertain classifications
+   $env:LLM_MODEL="gpt-4o-mini"  # Optional, defaults to gpt-4o-mini
+   ```
+2. The analyze endpoint will enhance deterministic recommendations with LLM reasoning
+3. LLM model version is stored in audit events and tool_results for traceability
+
+### Enable semantic RAG
+1. Set environment variable:
+   ```powershell
+   $env:RAG_SEMANTIC="1"
+   ```
+2. The first run will download the embedding model (sentence-transformers, ~90MB)
+3. Document search uses embeddings instead of keyword matching for better relevance
+
+**Note**: Both features are optional. The system works fully without them (deterministic + keyword RAG).
 
 ## Optional: API-key auth (basic, default OFF)
 This repo includes a minimal API-key auth layer suitable for demos and learning.

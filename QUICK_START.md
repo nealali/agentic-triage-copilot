@@ -32,9 +32,19 @@ pip install -r requirements.txt -r requirements-dev.txt
 
 ### 3) Run quality checks (what CI runs)
 
+Run lint and format, then tests (same as CI):
+
 ```powershell
 ruff check .
 black --check .
+python -m pytest -q
+```
+
+To auto-fix lint/format before committing:
+
+```powershell
+ruff check . --fix
+black .
 python -m pytest -q
 ```
 

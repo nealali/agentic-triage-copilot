@@ -46,6 +46,19 @@ This repo started with simple “issues” tests and now includes a more realist
    - Analyzer attaches citation doc IDs to recommendations
 6. **Excel ingestion**
    - Normalizer `from_excel_row` maps Excel columns to `IssueCreate` and `evidence_payload`
+7. **Automatic issue classification**
+   - Issues are automatically classified as `deterministic` or `llm_required` during ingestion
+   - **General rules first** (domain-agnostic keywords/patterns), then **domain-specific refinements**, with **scoring**
+   - Optional LLM fallback for uncertain cases (`CLASSIFIER_USE_LLM_FALLBACK=1`)
+   - In the UI, **deterministic** issues default to no LLM and no semantic RAG; **llm_required** issues force both on
+8. **RAG (Retrieval-Augmented Generation)**
+   - Keyword-based document retrieval (default)
+   - Semantic search using embeddings (optional, `RAG_SEMANTIC=1`)
+   - Citations attached to recommendations
+9. **LLM enhancement**
+   - Optional LLM-powered recommendation enhancement (`LLM_ENABLED=1`)
+   - Automatic LLM usage for `llm_required` issues
+   - Request-level override support
    - **POST `/ingest/issues`** accepts an `.xlsx` file and creates issues; test uploads fixture and asserts created count and that GET /issues includes new IDs (`apps/api/tests/test_excel_ingest.py`)
 7. **Optional API-key auth (feature-flagged)**
    - When enabled, mutation endpoints require `X-API-Key`
@@ -424,6 +437,10 @@ Running tests professionally means:
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt -r requirements-dev.txt
+
+# Lint and format (fix before committing)
+ruff check . --fix
+black .
 
 # Run tests (every time you make changes)
 ruff check .

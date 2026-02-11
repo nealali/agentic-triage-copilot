@@ -19,6 +19,8 @@ export default function IssueDetail() {
   const [closeReason, setCloseReason] = useState('')
   const [closeReviewer, setCloseReviewer] = useState('reviewer')
   const [closing, setClosing] = useState(false)
+  const [useLLM, setUseLLM] = useState(false)
+  const [useSemanticRAG, setUseSemanticRAG] = useState(false)
   const [form, setForm] = useState<DecisionCreate>({
     run_id: '',
     decision_type: 'APPROVE',
@@ -26,6 +28,7 @@ export default function IssueDetail() {
     final_text: '',
     reviewer: 'reviewer',
     reason: undefined,
+    specify: undefined,
   })
 
   useEffect(() => {
@@ -41,8 +44,45 @@ export default function IssueDetail() {
         if (!cancelled) {
           setOverview(overviewData)
           setDecisions(decisionsData)
+
+          // Set default checkboxes based on issue type
+          // Deterministic issues: default to false (no LLM, no semantic RAG)
+          // LLM-required issues: default to true (forced on anyway, but set for consistency)
+          if (overviewData.issue.issue_type === 'deterministic') {
+            setUseLLM(false)
+            setUseSemanticRAG(false)
+            // Clear sessionStorage for deterministic issues so defaults persist
+            sessionStorage.removeItem('analyze_use_llm')
+            sessionStorage.removeItem('analyze_use_semantic_rag')
+          } else if (overviewData.issue.issue_type === 'llm_required') {
+            // LLM-required issues always use LLM+RAG, but check sessionStorage for user preference
+            // (though it won't matter since they're forced on)
+            const savedLLM = sessionStorage.getItem('analyze_use_llm')
+            const savedRAG = sessionStorage.getItem('analyze_use_semantic_rag')
+            setUseLLM(savedLLM ? savedLLM === 'true' : true)
+            setUseSemanticRAG(savedRAG ? savedRAG === 'true' : true)
+          } else {
+            // Fallback: check sessionStorage
+            const savedLLM = sessionStorage.getItem('analyze_use_llm')
+            const savedRAG = sessionStorage.getItem('analyze_use_semantic_rag')
+            setUseLLM(savedLLM ? savedLLM === 'true' : false)
+            setUseSemanticRAG(savedRAG ? savedRAG === 'true' : false)
+          }
+
           const runId = overviewData.latest_run?.run_id
-          if (runId) setForm((f) => ({ ...f, run_id: runId, final_text: overviewData.latest_run ? '' : f.final_text }))
+          if (runId) {
+            setForm((f) => ({ ...f, run_id: runId, final_text: overviewData.latest_run ? '' : f.final_text }))
+            // Fetch full run to get rationale and draft_message
+            apiJson<AgentRun>(`/issues/${id}/runs/${runId}`)
+              .then((fullRun) => {
+                if (!cancelled) {
+                  setRunResult(fullRun)
+                }
+              })
+              .catch(() => {
+                // Ignore errors - will fall back to summary view
+              })
+          }
         }
       })
       .catch((err) => {
@@ -55,11 +95,17 @@ export default function IssueDetail() {
   }, [id])
 
   async function runAnalyze() {
-    if (!id) return
+    if (!id || !overview) return
     setAnalyzing(true)
     setRunResult(null)
     try {
-      const run = await apiJson<AgentRun>(`/issues/${id}/analyze`, { method: 'POST', body: JSON.stringify({}) })
+      // For LLM-required issues, force LLM+RAG (cannot be overridden)
+      const issueRequiresLLM = overview.issue.issue_type === 'llm_required'
+      const body = {
+        use_llm: issueRequiresLLM || useLLM,
+        use_semantic_rag: issueRequiresLLM || useSemanticRAG,
+      }
+      const run = await apiJson<AgentRun>(`/issues/${id}/analyze`, { method: 'POST', body: JSON.stringify(body) })
       setRunResult(run)
       setForm((f) => ({ ...f, run_id: run.run_id, final_text: run.recommendation.draft_message ?? '' }))
       setOverview((o) =>
@@ -137,6 +183,7 @@ export default function IssueDetail() {
           final_text: form.final_text,
           reviewer: form.reviewer,
           reason: form.decision_type === 'OVERRIDE' ? form.reason : undefined,
+          specify: form.final_action === 'OTHER' ? form.specify : undefined,
         }),
       })
       setDecideOpen(false)
@@ -201,6 +248,12 @@ export default function IssueDetail() {
             <dd>{issue.domain}</dd>
             <dt className="text-gray-500">Subject</dt>
             <dd>{issue.subject_id}</dd>
+            <dt className="text-gray-500">Type</dt>
+            <dd>
+              <span className={`px-2 py-0.5 rounded text-xs ${issue.issue_type === 'llm_required' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`} title={issue.issue_type === 'llm_required' ? 'Requires LLM+RAG analysis' : 'Deterministic rule-based analysis'}>
+                {issue.issue_type === 'llm_required' ? 'LLM Required' : 'Deterministic'}
+              </span>
+            </dd>
             <dt className="text-gray-500">Status</dt>
             <dd>
               <span className={`px-2 py-0.5 rounded ${issue.status === 'open' ? 'bg-amber-100' : issue.status === 'triaged' ? 'bg-blue-100' : 'bg-gray-200'}`}>
@@ -213,7 +266,7 @@ export default function IssueDetail() {
         </section>
 
         <section className="bg-white border rounded p-4">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="font-medium text-gray-700">Analysis</h2>
             <button
               type="button"
@@ -224,11 +277,149 @@ export default function IssueDetail() {
               {analyzing ? 'Running…' : 'Run analyze'}
             </button>
           </div>
+          <div className="flex flex-wrap gap-4 mb-3 text-sm">
+            {issue.issue_type === 'llm_required' && (
+              <div className="w-full text-xs text-purple-700 bg-purple-50 px-2 py-1 rounded">
+                This issue is classified as LLM-required and will automatically use LLM+RAG for analysis.
+              </div>
+            )}
+            <label className="flex items-center gap-2 cursor-pointer" title="Enhance recommendations with LLM reasoning (requires OPENAI_API_KEY)">
+              <input
+                type="checkbox"
+                checked={useLLM || issue.issue_type === 'llm_required'}
+                disabled={issue.issue_type === 'llm_required'}
+                onChange={(e) => {
+                  setUseLLM(e.target.checked)
+                  // Only save to sessionStorage for non-deterministic issues
+                  // Deterministic issues should always default to false
+                  if (issue.issue_type !== 'deterministic') {
+                    sessionStorage.setItem('analyze_use_llm', String(e.target.checked))
+                  }
+                }}
+                className="cursor-pointer"
+              />
+              <span className={`text-gray-700 ${issue.issue_type === 'llm_required' ? 'text-purple-700 font-medium' : ''}`}>
+                Use LLM enhancement {issue.issue_type === 'llm_required' && '(required)'}
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer" title="Use semantic search (embeddings) instead of keyword matching. Semantic RAG finds documents by meaning, not just exact word matches. It provides similarity scores (0-1) showing how relevant each document is.">
+              <input
+                type="checkbox"
+                checked={useSemanticRAG || issue.issue_type === 'llm_required'}
+                disabled={issue.issue_type === 'llm_required'}
+                onChange={(e) => {
+                  setUseSemanticRAG(e.target.checked)
+                  // Only save to sessionStorage for non-deterministic issues
+                  // Deterministic issues should always default to false
+                  if (issue.issue_type !== 'deterministic') {
+                    sessionStorage.setItem('analyze_use_semantic_rag', String(e.target.checked))
+                  }
+                }}
+                className="cursor-pointer"
+              />
+              <span className={`text-gray-700 ${issue.issue_type === 'llm_required' ? 'text-purple-700 font-medium' : ''}`}>
+                Use semantic RAG {issue.issue_type === 'llm_required' && '(required)'}
+              </span>
+            </label>
+          </div>
           {rec && (
             <div className="text-sm space-y-1 p-3 bg-gray-50 rounded">
               <p><span className="text-gray-500">Severity:</span> {rec.severity} · Action: {rec.action} · Confidence: {rec.confidence}</p>
-              {'rationale' in rec && rec.rationale && <p><span className="text-gray-500">Rationale:</span> {rec.rationale}</p>}
-              {'draft_message' in rec && rec.draft_message && <p><span className="text-gray-500">Draft message:</span> {rec.draft_message}</p>}
+              {'rationale' in rec && rec.rationale && (
+                <div>
+                  <p><span className="text-gray-500">Rationale:</span> {rec.rationale}</p>
+                  {runResult?.recommendation.tool_results?.llm_rationale_original && (
+                    <p className="text-xs text-gray-400 mt-1 italic">
+                      Original: {runResult.recommendation.tool_results.llm_rationale_original as string}
+                    </p>
+                  )}
+                </div>
+              )}
+              {'draft_message' in rec && rec.draft_message && (
+                <div>
+                  <p><span className="text-gray-500">Draft message:</span> {rec.draft_message}</p>
+                  {/* Warning when LLM generated a message but no citations were found */}
+                  {runResult?.recommendation.tool_results.llm_enhanced &&
+                    (!runResult.recommendation.citations || runResult.recommendation.citations.length === 0) && (
+                      <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
+                        <span className="font-medium">⚠️ Warning:</span> No citations found from RAG documents, but LLM still generated a draft message.
+                        Please review carefully as this recommendation may not be grounded in documented guidance.
+                      </div>
+                    )}
+                </div>
+              )}
+              {runResult?.recommendation.citations && runResult.recommendation.citations.length > 0 ? (
+                <div className="mt-2">
+                  <p className="text-gray-500 text-xs font-medium">
+                    Citations ({runResult.recommendation.citations.length})
+                    {runResult.recommendation.tool_results.rag_method === 'semantic' && (
+                      <span className="text-purple-600 ml-1">(semantic search)</span>
+                    )}
+                  </p>
+                  {runResult.recommendation.tool_results.citation_hits && (
+                    <ul className="text-xs text-gray-600 mt-1 space-y-1">
+                      {(runResult.recommendation.tool_results.citation_hits as Array<{ title: string, source: string, score?: number }>).slice(0, 3).map((hit, idx) => (
+                        <li key={idx} className="flex items-start gap-2">
+                          <span>•</span>
+                          <span className="flex-1">
+                            <span className="font-medium">{hit.title}</span>
+                            <span className="text-gray-500"> ({hit.source})</span>
+                            {runResult.recommendation.tool_results.rag_method === 'semantic' && hit.score !== undefined && (
+                              <span className="text-purple-600 font-medium ml-1">
+                                [similarity: {(hit.score * 100).toFixed(1)}%]
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <ul className="text-xs text-gray-400 list-disc list-inside mt-1">
+                    {runResult.recommendation.citations.map((cid, idx) => (
+                      <li key={idx}>{cid.slice(0, 8)}...</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : runResult?.recommendation.tool_results.rag_method && (
+                <div className="mt-2 text-xs text-gray-400">
+                  No citations found. {runResult.recommendation.tool_results.rag_method === 'semantic'
+                    ? 'Semantic search found no relevant documents.'
+                    : 'Keyword search found no matching documents.'}
+                </div>
+              )}
+              {runResult?.recommendation.tool_results && (
+                <div className="mt-2 pt-2 border-t border-gray-300 text-xs">
+                  <div className="text-gray-500 space-x-2">
+                    {runResult.recommendation.tool_results.rag_method && (
+                      <span className={runResult.recommendation.tool_results.rag_method === 'semantic' ? 'text-purple-600 font-medium' : ''} title={runResult.recommendation.tool_results.rag_method === 'semantic' ? 'Semantic RAG uses embeddings to find documents by meaning, providing similarity scores' : 'Keyword RAG uses exact word matching'}>
+                        RAG: {runResult.recommendation.tool_results.rag_method}
+                        {runResult.recommendation.tool_results.rag_method === 'semantic' && ' ✓'}
+                      </span>
+                    )}
+                    {runResult.recommendation.tool_results.llm_enhanced && (
+                      <span className="text-green-600 font-medium">
+                        ✓ LLM: {runResult.recommendation.tool_results.llm_model || 'enabled'}
+                      </span>
+                    )}
+                    {runResult.recommendation.tool_results.llm_requested && !runResult.recommendation.tool_results.llm_enhanced && (
+                      <span className="text-amber-600">
+                        ⚠ LLM requested but not enhanced
+                        {runResult.recommendation.tool_results.llm_failure_reason && (
+                          <div className="text-xs mt-1">{runResult.recommendation.tool_results.llm_failure_reason}</div>
+                        )}
+                        {!runResult.recommendation.tool_results.llm_failure_reason && (
+                          <div className="text-xs mt-1">Check OPENAI_API_KEY in .env file and restart server</div>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                  {runResult.recommendation.tool_results.rag_method === 'semantic' && runResult.recommendation.citations && runResult.recommendation.citations.length > 0 && (
+                    <div className="text-xs text-purple-600 mt-1 italic">
+                      Semantic search found {runResult.recommendation.citations.length} relevant document{runResult.recommendation.citations.length !== 1 ? 's' : ''} with similarity scores above
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {!rec && !analyzing && <p className="text-gray-500 text-sm">No run yet. Click “Run analyze”.</p>}
@@ -244,6 +435,9 @@ export default function IssueDetail() {
                 <li key={d.decision_id} className="border-l-2 border-gray-200 pl-3 py-1">
                   <p className="text-sm font-medium">{d.decision_type} · {d.final_action} by {d.reviewer}</p>
                   <p className="text-xs text-gray-500">{d.timestamp}</p>
+                  {d.final_action === 'OTHER' && d.specify && (
+                    <p className="text-xs text-blue-700 mt-1 font-medium">Specify: {d.specify}</p>
+                  )}
                   <p className="text-sm text-gray-600 mt-1">{d.final_text}</p>
                   {d.reason && <p className="text-xs text-amber-700 mt-1">Reason: {d.reason}</p>}
                 </li>
@@ -311,8 +505,21 @@ export default function IssueDetail() {
                   <option value="DATA_FIX">DATA_FIX</option>
                   <option value="MEDICAL_REVIEW">MEDICAL_REVIEW</option>
                   <option value="IGNORE">IGNORE</option>
+                  <option value="OTHER">OTHER</option>
                 </select>
               </label>
+              {form.final_action === 'OTHER' && (
+                <label className="block">
+                  <span className="text-sm text-gray-600">Specify (required for OTHER) <span className="text-red-500">*</span></span>
+                  <input
+                    value={form.specify ?? ''}
+                    onChange={(e) => setForm((f) => ({ ...f, specify: e.target.value || undefined }))}
+                    className="w-full border rounded px-2 py-1"
+                    placeholder="e.g., Escalate to data manager, Request protocol clarification"
+                    required
+                  />
+                </label>
+              )}
               <label className="block">
                 <span className="text-sm text-gray-600">Final text</span>
                 <textarea

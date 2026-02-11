@@ -22,6 +22,7 @@ class Action(str, Enum):
     DATA_FIX = "DATA_FIX"
     MEDICAL_REVIEW = "MEDICAL_REVIEW"
     IGNORE = "IGNORE"
+    OTHER = "OTHER"
 
 
 class Severity(str, Enum):

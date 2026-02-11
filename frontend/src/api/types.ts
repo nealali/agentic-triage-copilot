@@ -3,6 +3,7 @@
 export type IssueStatus = 'open' | 'triaged' | 'closed'
 export type IssueSource = 'manual' | 'edit_check' | 'listing'
 export type IssueDomain = string
+export type IssueType = 'deterministic' | 'llm_required'
 
 export interface Issue {
   issue_id: string
@@ -11,12 +12,13 @@ export interface Issue {
   subject_id: string
   fields: string[]
   description: string
+  issue_type: IssueType
   evidence_payload: Record<string, unknown>
   status: IssueStatus
   created_at: string
 }
 
-export type Action = 'QUERY_SITE' | 'DATA_FIX' | 'MEDICAL_REVIEW' | 'IGNORE'
+export type Action = 'QUERY_SITE' | 'DATA_FIX' | 'MEDICAL_REVIEW' | 'IGNORE' | 'OTHER'
 export type Severity = 'LOW' | 'MEDIUM' | 'HIGH'
 
 export interface AgentRunSummary {
@@ -57,6 +59,7 @@ export interface Decision {
   final_text: string
   reviewer: string
   reason: string | null
+  specify: string | null
   timestamp: string
 }
 
@@ -67,6 +70,7 @@ export interface DecisionCreate {
   final_text: string
   reviewer: string
   reason?: string | null
+  specify?: string | null
 }
 
 export interface IssueOverview {

@@ -74,6 +74,7 @@ class IssueDomain(str, Enum):
     - VS: vital signs
     - LB: labs
     - AE: adverse events
+    - CM: concomitant medications
 
     We also include COMMERCIAL and MEDICAL to reflect broader enterprise use cases.
     """
@@ -82,8 +83,21 @@ class IssueDomain(str, Enum):
     VS = "VS"
     LB = "LB"
     AE = "AE"
+    CM = "CM"
     COMMERCIAL = "COMMERCIAL"
     MEDICAL = "MEDICAL"
+
+
+class IssueType(str, Enum):
+    """
+    Classification of issue handling approach.
+
+    - DETERMINISTIC: Can be handled by rule-based deterministic analysis (default)
+    - LLM_REQUIRED: Requires LLM + RAG for nuanced analysis and message generation
+    """
+
+    DETERMINISTIC = "deterministic"
+    LLM_REQUIRED = "llm_required"
 
 
 class IssueCreate(BaseModel):
@@ -107,6 +121,10 @@ class IssueCreate(BaseModel):
     subject_id: str = Field(..., description="ID of the subject")
     fields: list[str] = Field(..., description="List of fields related to the issue")
     description: str = Field(..., description="Description of the issue")
+    issue_type: IssueType = Field(
+        default=IssueType.DETERMINISTIC,
+        description="Classification: deterministic (rule-based) or llm_required (needs LLM+RAG). Auto-classified by system.",
+    )
     evidence_payload: dict[str, Any] = Field(
         ..., description="Evidence payload containing additional data"
     )
@@ -153,6 +171,10 @@ class Issue(BaseModel):
     subject_id: str = Field(..., description="ID of the subject")
     fields: list[str] = Field(..., description="List of fields related to the issue")
     description: str = Field(..., description="Description of the issue")
+    issue_type: IssueType = Field(
+        default=IssueType.DETERMINISTIC,
+        description="Classification: deterministic (rule-based) or llm_required (needs LLM+RAG).",
+    )
     evidence_payload: dict[str, Any] = Field(
         ..., description="Evidence payload containing additional data"
     )

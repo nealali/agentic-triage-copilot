@@ -101,6 +101,7 @@ export default function IssuesList() {
                 <th className="text-left p-2">ID</th>
                 <th className="text-left p-2">Domain</th>
                 <th className="text-left p-2">Subject</th>
+                <th className="text-left p-2">Type</th>
                 <th className="text-left p-2">Status</th>
                 <th className="text-left p-2">Description</th>
               </tr>
@@ -115,6 +116,11 @@ export default function IssuesList() {
                   </td>
                   <td className="p-2">{i.domain}</td>
                   <td className="p-2">{i.subject_id}</td>
+                  <td className="p-2">
+                    <span className={`px-2 py-0.5 rounded text-xs ${i.issue_type === 'llm_required' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`} title={i.issue_type === 'llm_required' ? 'Requires LLM+RAG analysis' : 'Deterministic rule-based analysis'}>
+                      {i.issue_type === 'llm_required' ? 'LLM' : 'Rule'}
+                    </span>
+                  </td>
                   <td className="p-2">
                     <span className={`px-2 py-0.5 rounded ${i.status === 'open' ? 'bg-amber-100' : i.status === 'triaged' ? 'bg-blue-100' : 'bg-gray-200'}`}>
                       {i.status}

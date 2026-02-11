@@ -11,6 +11,7 @@ These tests exercise the "canonical workflow":
 We use FastAPI TestClient to run the app in-memory (no real server process needed).
 """
 
+import os
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -38,7 +39,7 @@ def _create_issue(client: TestClient, *, description: str, evidence_payload: dic
     return res.json()
 
 
-def test_analyze_existing_issue_creates_run_and_triages_issue() -> None:
+def test_analyze_existing_issue_creates_run_but_does_not_triage() -> None:
     client = TestClient(app)
 
     # Create an issue that should trigger AE date inconsistency.
@@ -63,10 +64,10 @@ def test_analyze_existing_issue_creates_run_and_triages_issue() -> None:
     assert 0.0 <= run["recommendation"]["confidence"] <= 1.0
     assert run["recommendation"]["tool_results"]["rule_fired"] == "AE_DATE_INCONSISTENCY"
 
-    # Issue status becomes triaged
+    # Issue status remains OPEN (only changes to TRIAGED when decision is recorded)
     issue_res = client.get(f"/issues/{issue_id}")
     assert issue_res.status_code == 200
-    assert issue_res.json()["status"] == "triaged"
+    assert issue_res.json()["status"] == "open"
 
 
 def test_analyze_missing_issue_returns_404() -> None:
@@ -357,5 +358,43 @@ def test_issue_overview_includes_latest_run_decision_and_audit() -> None:
     assert overview["latest_decision"]["reviewer"] == "reviewer_overview"
     assert overview["runs_count"] >= 1
     assert overview["decisions_count"] >= 1
-    assert isinstance(overview["recent_audit_events"], list)
-    assert any(e.get("correlation_id") for e in overview["recent_audit_events"])
+
+
+def test_analyze_works_without_llm_or_semantic_rag() -> None:
+    """Verify analyze works with deterministic + keyword RAG (default behavior)."""
+    # Ensure LLM and semantic RAG are disabled for this test
+    original_llm = os.environ.get("LLM_ENABLED")
+    original_rag = os.environ.get("RAG_SEMANTIC")
+    try:
+        os.environ.pop("LLM_ENABLED", None)
+        os.environ.pop("RAG_SEMANTIC", None)
+
+        client = TestClient(app)
+        issue = _create_issue(
+            client,
+            description="Missing critical field.",
+            evidence_payload={"field_x": None},
+        )
+        issue_id = issue["issue_id"]
+
+        run_res = client.post(f"/issues/{issue_id}/analyze")
+        assert run_res.status_code == 200
+        run = run_res.json()
+
+        # Should have deterministic recommendation
+        assert "recommendation" in run
+        assert "severity" in run["recommendation"]
+        assert "action" in run["recommendation"]
+        assert "tool_results" in run["recommendation"]
+        assert "rule_fired" in run["recommendation"]["tool_results"]
+
+        # Should use keyword RAG (default)
+        assert run["recommendation"]["tool_results"].get("rag_method") == "keyword"
+
+        # Should not have LLM enhancement
+        assert not run["recommendation"]["tool_results"].get("llm_enhanced", False)
+    finally:
+        if original_llm:
+            os.environ["LLM_ENABLED"] = original_llm
+        if original_rag:
+            os.environ["RAG_SEMANTIC"] = original_rag

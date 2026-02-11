@@ -41,6 +41,12 @@ def ingest_document(
     return doc
 
 
+@router.get("", response_model=list[Document])
+def list_documents() -> list[Document]:
+    """List all ingested documents."""
+    return storage.BACKEND.list_documents()
+
+
 @router.get("/search", response_model=list[DocumentHit])
 def search_documents(q: str = Query(..., min_length=1), limit: int = 10) -> list[DocumentHit]:
     """Keyword search over ingested documents."""
