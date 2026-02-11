@@ -29,8 +29,8 @@ import httpx
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from agent.classify.classifier import _classify_rule_based
-from agent.schemas.issue import IssueCreate
+from agent.classify.classifier import _classify_rule_based  # noqa: E402
+from agent.schemas.issue import IssueCreate  # noqa: E402
 
 
 def test_classification(base_url: str, api_key: str | None = None) -> None:

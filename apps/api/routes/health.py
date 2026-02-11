@@ -55,7 +55,7 @@ def llm_health_check():
     api_call_error = None
     if client_created:
         try:
-            response = client.chat.completions.create(
+            _ = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": "Say 'test'"}],
                 max_tokens=5,

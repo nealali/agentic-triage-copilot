@@ -100,7 +100,7 @@ def enhance_with_llm(
                     )
                     # Try to create client directly to see the actual error
                     try:
-                        test_client = OpenAI(api_key=api_key)
+                        _ = OpenAI(api_key=api_key)
                         logger.warning("Direct client creation succeeded - this is unexpected")
                     except Exception as e:
                         logger.error(f"Direct client creation failed: {type(e).__name__}: {e}")

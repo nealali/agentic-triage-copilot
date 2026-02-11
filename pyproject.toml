@@ -6,6 +6,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+# E501 (line length) left to black; long docstrings/prompt strings are exempt
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 # Only collect tests from apps/api/tests (exclude scripts/ which has integration scripts, not pytest tests)

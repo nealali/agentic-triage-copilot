@@ -49,7 +49,7 @@ if os.getenv("RAG_SEMANTIC", "").strip().lower() in ("1", "true", "yes"):
 
 # Check if OpenAI library is available
 try:
-    from openai import OpenAI  # type: ignore[import-untyped]
+    from openai import OpenAI  # type: ignore[import-untyped]  # noqa: F401
 
     logger.info("OpenAI library is available")
 except ImportError:

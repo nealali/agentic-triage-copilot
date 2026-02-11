@@ -153,7 +153,6 @@ def analyze(issue_id: UUID, req: AnalyzeRequest | None = None) -> AgentRun:
     )
     if use_llm:
         llm_model = req.llm_model or os.getenv("LLM_MODEL", "gpt-4o-mini")
-        recommendation_before_llm = recommendation  # Keep for comparison
         import logging
 
         logger = logging.getLogger("agentic_triage_copilot.api")
@@ -163,7 +162,7 @@ def analyze(issue_id: UUID, req: AnalyzeRequest | None = None) -> AgentRun:
 
         # Check if OpenAI is available before attempting
         try:
-            from openai import OpenAI
+            from openai import OpenAI  # noqa: F401
 
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
